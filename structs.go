@@ -1,21 +1,68 @@
 package main
 
-import "net"
+import (
+	"crypto/rsa"
+	"net"
+)
 
+// struct representing a client
 type Node struct {
-	id            string
-	privateKey    int
-	publicKey     int
-	address       string
-	neighborMap   map[string]*Neighbor
-	connectionMap map[string]net.Conn
-	broadcast     chan bool
-	broadcastType MessageTypeVar
+	id                   string
+	privateKey           rsa.PrivateKey
+	publicKey            rsa.PublicKey
+	address              string
+	neighborMap          map[string]*Neighbor
+	connectionMap        map[string]net.Conn
+	utxos                map[string]map[[32]byte]TXOutput
+	own_utxos            utxoStack
+	broadcast            chan bool
+	broadcastType        MessageTypeVar
+	initiatedTransaction Transaction
 }
 
+// struct containing connected node's PublicKey and Address
 type Neighbor struct {
-	PublicKey string
+	PublicKey rsa.PublicKey
 	Address   string
+}
+
+// struct containing all necessary transaction info without sender's signature
+type UnsignedTransaction struct {
+	SenderAddress      rsa.PublicKey
+	ReceiverAddress    rsa.PublicKey
+	Amount             uint
+	TransactionID      [32]byte
+	TransactionInputs  []TXInput
+	TransactionOutputs [2]TXOutput
+}
+
+// struct containing all necessary transaction info
+type Transaction struct {
+	SenderAddress      rsa.PublicKey
+	ReceiverAddress    rsa.PublicKey
+	Amount             uint
+	TransactionID      [32]byte
+	TransactionInputs  []TXInput
+	TransactionOutputs [2]TXOutput
+	Signature          []byte
+}
+
+// struct representing Transaction Input
+// PreviousOutputID is the ID of a TXOutput not yet spent
+type TXInput struct {
+	PreviousOutputID [32]byte
+}
+
+// struct representing Transaction Output
+// ID is unique for each TXOutput
+// TransactionID is the unique ID of the Transaction which created this TXOutput
+// RecipientAddress is the PublicKey of the node to which the TXOutput is credited
+// Amount is the number of coins contained in this TXOutput
+type TXOutput struct {
+	ID               [32]byte
+	TransactionID    [32]byte
+	RecipientAddress rsa.PublicKey
+	Amount           uint
 }
 
 // each message has a type to differentiate treatment
@@ -27,6 +74,7 @@ const (
 	SelfInfoMessageType
 	NeighborsMessageType
 	NewConnMessageType
+	TransactionMessageType
 )
 
 // sent on connection closing
@@ -42,7 +90,7 @@ type WelcomeMessage struct {
 // contains own id, public key and listening address
 type SelfInfoMessage struct {
 	ID        string
-	PublicKey int
+	PublicKey rsa.PublicKey
 	Address   string
 }
 
@@ -57,6 +105,11 @@ type NeighborsMessage struct {
 // contains source node's id
 type NewConnMessage struct {
 	ID string
+}
+
+// sent to share a transaction with other nodes
+type TransactionMessage struct {
+	TX Transaction
 }
 
 // general message type sent over established connections

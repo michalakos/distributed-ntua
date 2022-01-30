@@ -6,9 +6,11 @@ import (
 	"time"
 )
 
-var thisNode Node
-
+// TODO:
+// create genesis block
+// transfer funds to each connected client
 func main() {
+	var thisNode Node
 
 	localAddr := flag.String("local", "localhost:50001", "local node's [IP:port]")
 	remoteAddr := flag.String("remote", "localhost:50000", "bootstrap node's [IP:port]")

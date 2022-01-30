@@ -2,10 +2,10 @@ package main
 
 import (
 	"bufio"
+	"crypto/sha256"
 	"encoding/json"
 	"log"
 	"net"
-	"strconv"
 )
 
 // send Message struct over established connection
@@ -14,7 +14,7 @@ func sendMessage(conn net.Conn, m Message) {
 	mb, _ := json.Marshal(m)
 
 	log.Printf("sendMessage: Sending message to %s\n", conn.RemoteAddr())
-	log.Printf("sendMessage: Message sent: %s\n", mb)
+	// log.Printf("sendMessage: Message sent: %s\n", mb)
 
 	// send message + "\n" as messages are separated by newline characters
 	conn.Write(mb)
@@ -23,11 +23,12 @@ func sendMessage(conn net.Conn, m Message) {
 
 // send WelcomeMessage over connection with assigned id
 // used only by bootstrap
-func sendWelcomeMessage(conn net.Conn, id string) {
+func (n *Node) sendWelcomeMessage(conn net.Conn, id string) {
 	log.Printf("sendWelcomeMessage: Send id %s\n", id)
 
 	// add new Neighbor
-	thisNode.neighborMap[id] = new(Neighbor)
+	n.neighborMap[id] = new(Neighbor)
+	n.utxos[id] = make(map[[32]byte]TXOutput)
 
 	// create WelcomeMessage with assigned id
 	wm := WelcomeMessage{id}
@@ -41,11 +42,12 @@ func sendWelcomeMessage(conn net.Conn, id string) {
 	sendMessage(conn, m)
 }
 
-func sendNewConnMessage(conn net.Conn) {
+// send NewConnMessage to nodes (not bootstap) with which a connection is made
+func (n *Node) sendNewConnMessage(conn net.Conn) {
 	log.Printf("sendNewConnMessage: Send id to %s\n", conn.RemoteAddr())
 
 	// create NewConnMessage containing source's id
-	ncm := NewConnMessage{thisNode.id}
+	ncm := NewConnMessage{n.id}
 
 	// encode to add it to Message
 	ncmb, err := json.Marshal(ncm)
@@ -62,14 +64,14 @@ func sendNewConnMessage(conn net.Conn) {
 }
 
 // send own information to bootstrap over established connection
-func sendSelfInfoMessage(conn net.Conn) {
+func (n *Node) sendSelfInfoMessage(conn net.Conn) {
 	log.Println("sendSelfInfoMessage: Creating message")
 
 	// create SelfInfoMessage containing ID, PublicKey and Address
 	sim := SelfInfoMessage{
-		ID:        thisNode.id,
-		PublicKey: thisNode.publicKey,
-		Address:   thisNode.address}
+		ID:        n.id,
+		PublicKey: n.publicKey,
+		Address:   n.address}
 
 	// encode message as json
 	simb, _ := json.Marshal(sim)
@@ -85,24 +87,23 @@ func sendSelfInfoMessage(conn net.Conn) {
 }
 
 // send information about all connected nodes over established connection
-func (*Node) sendNeighborMessage(conn net.Conn) {
+func (n *Node) sendNeighborMessage(conn net.Conn) {
 	log.Println("sendNeighborMessage: Creating message")
 
 	// create map to add to NeighborsMessage
 	neighbors := make(map[string]Neighbor)
-	for k, v := range thisNode.neighborMap {
+	for k, v := range n.neighborMap {
 		neighbors[k] = Neighbor{Address: v.Address, PublicKey: v.PublicKey}
 	}
 
 	// create NeighborsMessage
 	nm := NeighborsMessage{neighbors}
-	log.Println("sendNeighborMessage: message sent", nm)
+	// log.Println("sendNeighborMessage: message sent", nm)
 
 	// encode NeighborsMessage as json
 	nmb, err := json.Marshal(nm)
 	if err != nil {
-		log.Println("sendNeighborMessage:")
-		log.Println(err)
+		log.Println("sendNeighborMessage:", err)
 	}
 
 	// create Message
@@ -115,85 +116,116 @@ func (*Node) sendNeighborMessage(conn net.Conn) {
 	sendMessage(conn, m)
 }
 
+// send message containing a transaction
+func (n *Node) sendTransactionMessage(conn net.Conn, tx Transaction) {
+	log.Println("sendTransactionMessage: Creating message")
+
+	txm := TransactionMessage{tx}
+
+	txmb, err := json.Marshal(txm)
+	if err != nil {
+		log.Println("sendTransactionMessage:", err)
+	}
+
+	m := Message{
+		MessageType: TransactionMessageType,
+		Data:        txmb,
+	}
+
+	log.Println("sendTransactionMessage: Calling sendMessage")
+	sendMessage(conn, m)
+}
+
 // listen to connection and get messages
 // return Message struct
 func receiveMessage(conn net.Conn) (Message, error) {
 	messageBytes, err := bufio.NewReader(conn).ReadString('\n')
 	if err != nil {
-		log.Println("receiveMessage:")
-		log.Println(err)
+		log.Println("receiveMessage:", err)
 		log.Println("Closing connection")
 		conn.Close()
 		return Message{}, err
 	}
 
-	log.Printf("receiveMessage: Message received: %s\n", messageBytes)
 	var m Message
-
-	// decode []byte message into Message
 	err = json.Unmarshal([]byte(messageBytes), &m)
 	if err != nil {
-		log.Println("receiveMessage:")
-		log.Println(err)
+		log.Println("receiveMessage:", err)
 	}
 
-	// return Message m
 	return m, nil
 }
 
 // update neighbors' information based on received NeighborsMessage
-func receiveNeighborsMessage(nmb []byte) {
+func (n *Node) receiveNeighborsMessage(nmb []byte) {
 
 	// decode message
 	var nm NeighborsMessage
 	err := json.Unmarshal(nmb, &nm)
 	if err != nil {
-		log.Println("receiveNeighborMessage:")
-		log.Println(err)
+		log.Println("receiveNeighborMessage:", err)
 	}
-	log.Printf("receiveNeighborMessage: Message received: %s\n", nmb)
 
 	// for each node in the message update stored info
 	for k, v := range nm.Neighbors {
 
 		// if we already have info about node skip
-		if _, ok := thisNode.neighborMap[k]; ok {
+		if _, ok := n.neighborMap[k]; ok {
 			continue
 
 			// if this is a new node create Neighbor struct and store info
 		} else {
-			thisNode.neighborMap[k] = &Neighbor{Address: v.Address, PublicKey: v.PublicKey}
-			log.Printf("receiveNeighborMessage: %s Address: %s, PublicKey: %s", k, v.Address, v.PublicKey)
+			n.neighborMap[k] = &Neighbor{Address: v.Address, PublicKey: v.PublicKey}
+			n.utxos[k] = make(map[[32]byte]TXOutput)
+
+			// TODO: remove utxo addition - used for testing
+			if k == "id0" {
+				n.utxos[k][sha256.Sum256([]byte("hey1"))] = TXOutput{
+					ID:               sha256.Sum256([]byte("hey1")),
+					TransactionID:    sha256.Sum256([]byte("hey")),
+					RecipientAddress: n.publicKey,
+					Amount:           5,
+				}
+				n.utxos[k][sha256.Sum256([]byte("hey2"))] = TXOutput{
+					ID:               sha256.Sum256([]byte("hey2")),
+					TransactionID:    sha256.Sum256([]byte("hey")),
+					RecipientAddress: n.publicKey,
+					Amount:           2,
+				}
+				n.utxos[k][sha256.Sum256([]byte("hey3"))] = TXOutput{
+					ID:               sha256.Sum256([]byte("hey3")),
+					TransactionID:    sha256.Sum256([]byte("hey")),
+					RecipientAddress: n.publicKey,
+					Amount:           19,
+				}
+			}
 		}
 	}
 
-	// call establishConnections to create connections to
-	// all new nodes
-	thisNode.establishConnections()
+	// call establishConnections to create connections to all new nodes
+	n.establishConnections()
 }
 
 // extract information from SelfInfoMessage and store it
-func receiveSelfInfoMessage(simb []byte) {
+func (n *Node) receiveSelfInfoMessage(simb []byte) string {
 
 	// decode received message
 	var sim SelfInfoMessage
 	err := json.Unmarshal(simb, &sim)
 	if err != nil {
-		log.Println("receiveSelfInfoMessage:")
-		log.Println(err)
+		log.Println("receiveSelfInfoMessage:", err)
 	}
 
 	// store info in neighborMap
-	// TODO: update for read PublicKey
-	thisNode.neighborMap[sim.ID].PublicKey = strconv.Itoa(sim.PublicKey)
-	thisNode.neighborMap[sim.ID].Address = sim.Address
+	n.neighborMap[sim.ID].PublicKey = sim.PublicKey
+	n.neighborMap[sim.ID].Address = sim.Address
 
-	log.Printf("receiveSelfInfoMessage: Message from node %s with publicKey %d and address %s\n",
-		sim.ID, sim.PublicKey, sim.Address)
+	log.Printf("receiveSelfInfoMessage: Message from node %s\n", sim.ID)
+	return sim.ID
 }
 
 // receive assigned id from bootstrap node
-func receiveWelcomeMessage(wmb []byte) {
+func (n *Node) receiveWelcomeMessage(wmb []byte) {
 
 	// decode message
 	var wm WelcomeMessage
@@ -203,10 +235,27 @@ func receiveWelcomeMessage(wmb []byte) {
 	}
 
 	// update own id with value received
-	thisNode.id = wm.ID
-	log.Printf("receiveWelcomeMessage: Assigned %s\n", thisNode.id)
+	n.id = wm.ID
+	log.Printf("receiveWelcomeMessage: Assigned %s\n", n.id)
+	n.neighborMap[n.id] = &Neighbor{
+		PublicKey: n.publicKey,
+		Address:   n.address,
+	}
 }
 
+// decode TransactionMessage and return a Transaction struct
+func (n *Node) receiveTransactionMessage(txmb []byte) Transaction {
+	var txm TransactionMessage
+	err := json.Unmarshal(txmb, &txm)
+	if err != nil {
+		log.Println("receiveTransactionMessage: ", err)
+	}
+
+	return txm.TX
+}
+
+// received on new connections with nodes that aren't the bootstrap
+// returns the id of the node to which the connection is made
 func receiveNewConnMessage(ncmb []byte) string {
 	var ncm NewConnMessage
 	err := json.Unmarshal(ncmb, &ncm)
@@ -214,7 +263,6 @@ func receiveNewConnMessage(ncmb []byte) string {
 		log.Println("receiveNewConnMessage: ", err)
 	}
 
-	log.Printf("receiveNewConnMessage: received message with %s\n", ncm.ID)
-
+	log.Printf("receiveNewConnMessage: received message from %s\n", ncm.ID)
 	return ncm.ID
 }
