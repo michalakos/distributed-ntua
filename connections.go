@@ -52,7 +52,6 @@ func (n *Node) monitorConnection(conn net.Conn, conn_id string) {
 			log.Println("monitorConnection: NullMessage received. Closing connection")
 			delete(n.neighborMap, conn_id)
 			delete(n.connectionMap, conn_id)
-			delete(n.utxos, conn_id)
 			conn.Close()
 			return
 

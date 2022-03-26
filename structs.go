@@ -13,7 +13,7 @@ type Node struct {
 	address              string
 	neighborMap          map[string]*Neighbor
 	connectionMap        map[string]net.Conn
-	utxos                map[string]map[[32]byte]TXOutput
+	utxos                map[[32]byte]TXOutput
 	own_utxos            utxoStack
 	broadcast            chan bool
 	broadcastType        MessageTypeVar

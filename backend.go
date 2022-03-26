@@ -18,9 +18,29 @@ func (n *Node) Setup(localAddr string) {
 	n.address = localAddr
 	n.neighborMap = make(map[string]*Neighbor)
 	n.connectionMap = make(map[string]net.Conn)
-	n.utxos = make(map[string]map[[32]byte]TXOutput)
+	n.utxos = make(map[[32]byte]TXOutput)
 	n.broadcast = make(chan bool)
 	n.own_utxos = *NewStack()
+
+	// TODO: remove utxos after testing
+	n.utxos[sha256.Sum256([]byte("hey1"))] = TXOutput{
+		ID:               sha256.Sum256([]byte("hey1")),
+		TransactionID:    sha256.Sum256([]byte("hey")),
+		RecipientAddress: n.publicKey,
+		Amount:           5,
+	}
+	n.utxos[sha256.Sum256([]byte("hey2"))] = TXOutput{
+		ID:               sha256.Sum256([]byte("hey2")),
+		TransactionID:    sha256.Sum256([]byte("hey")),
+		RecipientAddress: n.publicKey,
+		Amount:           2,
+	}
+	n.utxos[sha256.Sum256([]byte("hey3"))] = TXOutput{
+		ID:               sha256.Sum256([]byte("hey3")),
+		TransactionID:    sha256.Sum256([]byte("hey")),
+		RecipientAddress: n.publicKey,
+		Amount:           19,
+	}
 }
 
 // create pair of private - public key
@@ -102,27 +122,47 @@ func (n *Node) createTransaction(receiverID string, amount uint) (UnsignedTransa
 	var total_creds uint = 0
 	var utxos []TXOutput
 
+	// get utxos to fund transaction
 	for total_creds < amount {
 		utxo, err := n.own_utxos.Pop()
+
+		// no more utxos - transaction fails
+		// return utxos to stack
 		if err != nil {
 			log.Println("createTransaction: ", err)
+
+			for _, utxo := range utxos {
+				n.own_utxos.Push(utxo)
+			}
+
 			return UnsignedTransaction{}, errors.New("insufficient_funds")
 		}
+
 		total_creds += utxo.Amount
 		utxos = append(utxos, utxo)
 	}
 
 	recipient := n.neighborMap[receiverID].PublicKey
 	var tx_id, txout1_id, txout2_id [32]byte
+	key := make([]byte, 32)
 
-	rand_data := make([]byte, 10)
-	if _, err := rand.Read(rand_data); err == nil {
-		tx_id = sha256.Sum256(rand_data)
-		txout1_id = sha256.Sum256(rand_data)
-		txout2_id = sha256.Sum256(rand_data)
-	} else {
-		log.Println("createTransaction: tx_id->", err)
+	_, err := rand.Read(key)
+	if err != nil {
+		log.Println("createTransaction:", err)
 	}
+	copy(tx_id[:], key)
+
+	_, err = rand.Read(key)
+	if err != nil {
+		log.Println("createTransaction:", err)
+	}
+	copy(txout1_id[:], key)
+
+	_, err = rand.Read(key)
+	if err != nil {
+		log.Println("createTransaction:", err)
+	}
+	copy(txout2_id[:], key)
 
 	var inputs []TXInput
 	for _, utxo := range utxos {
@@ -257,13 +297,14 @@ func (n *Node) validateTransaction(tx Transaction) bool {
 	// public key not responding to any known neighbor
 	if !found {
 		log.Println("validateTransaction: failed to match ReceiverAddress to any known node")
+		log.Println("unmatched ReceiverAddress -> ", tx.ReceiverAddress)
 		return false
 	}
 
 	// check if inputs are valid
 	input_sum := uint(0)
 	for _, ti := range tx.TransactionInputs {
-		if txout, ok := n.utxos[sender_id][ti.PreviousOutputID]; !ok {
+		if txout, ok := n.utxos[ti.PreviousOutputID]; !ok {
 			log.Println("validateTransaction: failed to match Transaction Inputs to UTXOs")
 			return false
 		} else {
@@ -294,7 +335,7 @@ func (n *Node) validateTransaction(tx Transaction) bool {
 
 	// remove utxos used as transaction inputs
 	for _, ti := range tx.TransactionInputs {
-		delete(n.utxos[sender_id], ti.PreviousOutputID)
+		delete(n.utxos, ti.PreviousOutputID)
 	}
 
 	var recTX, sendTX *TXOutput
@@ -314,13 +355,15 @@ func (n *Node) validateTransaction(tx Transaction) bool {
 	// add transaction outputs as utxos
 	if receiver_id == n.id {
 		n.own_utxos.Push(*recTX)
-		n.utxos[sender_id][sendTX.ID] = *sendTX
+		n.utxos[recTX.ID] = *recTX
+		n.utxos[sendTX.ID] = *sendTX
 	} else if sender_id == n.id {
 		n.own_utxos.Push(*sendTX)
-		n.utxos[receiver_id][recTX.ID] = *recTX
+		n.utxos[recTX.ID] = *recTX
+		n.utxos[sendTX.ID] = *sendTX
 	} else {
-		n.utxos[sender_id][sendTX.ID] = *sendTX
-		n.utxos[receiver_id][recTX.ID] = *recTX
+		n.utxos[recTX.ID] = *recTX
+		n.utxos[sendTX.ID] = *sendTX
 	}
 	log.Println("validateTransaction: Transaction valid")
 	return true

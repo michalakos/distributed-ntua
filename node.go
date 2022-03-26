@@ -2,7 +2,9 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
+	"os"
 	"time"
 )
 
@@ -10,6 +12,11 @@ import (
 // create genesis block
 // transfer funds to each connected client
 func main() {
+	if len(os.Args) < 2 {
+		fmt.Println("Try './node.exe -h' for help")
+		os.Exit(0)
+	}
+
 	var thisNode Node
 
 	localAddr := flag.String("local", "localhost:50001", "local node's [IP:port]")

@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"crypto/sha256"
 	"encoding/json"
 	"log"
 	"net"
@@ -28,13 +27,16 @@ func (n *Node) sendWelcomeMessage(conn net.Conn, id string) {
 
 	// add new Neighbor
 	n.neighborMap[id] = new(Neighbor)
-	n.utxos[id] = make(map[[32]byte]TXOutput)
 
 	// create WelcomeMessage with assigned id
 	wm := WelcomeMessage{id}
 
 	// encode message as json and create Message to be sent
-	wmb, _ := json.Marshal(wm)
+	wmb, err := json.Marshal(wm)
+	if err != nil {
+		log.Fatal("sendWelcomeMessage:", err)
+	}
+
 	m := Message{WelcomeMessageType, wmb}
 
 	// send created Message
@@ -74,7 +76,10 @@ func (n *Node) sendSelfInfoMessage(conn net.Conn) {
 		Address:   n.address}
 
 	// encode message as json
-	simb, _ := json.Marshal(sim)
+	simb, err := json.Marshal(sim)
+	if err != nil {
+		log.Fatal("sendSelfInfoMessage:", err)
+	}
 
 	// create Message containing encoded message
 	m := Message{
@@ -176,29 +181,6 @@ func (n *Node) receiveNeighborsMessage(nmb []byte) {
 			// if this is a new node create Neighbor struct and store info
 		} else {
 			n.neighborMap[k] = &Neighbor{Address: v.Address, PublicKey: v.PublicKey}
-			n.utxos[k] = make(map[[32]byte]TXOutput)
-
-			// TODO: remove utxo addition - used for testing
-			if k == "id0" {
-				n.utxos[k][sha256.Sum256([]byte("hey1"))] = TXOutput{
-					ID:               sha256.Sum256([]byte("hey1")),
-					TransactionID:    sha256.Sum256([]byte("hey")),
-					RecipientAddress: n.publicKey,
-					Amount:           5,
-				}
-				n.utxos[k][sha256.Sum256([]byte("hey2"))] = TXOutput{
-					ID:               sha256.Sum256([]byte("hey2")),
-					TransactionID:    sha256.Sum256([]byte("hey")),
-					RecipientAddress: n.publicKey,
-					Amount:           2,
-				}
-				n.utxos[k][sha256.Sum256([]byte("hey3"))] = TXOutput{
-					ID:               sha256.Sum256([]byte("hey3")),
-					TransactionID:    sha256.Sum256([]byte("hey")),
-					RecipientAddress: n.publicKey,
-					Amount:           19,
-				}
-			}
 		}
 	}
 
