@@ -15,9 +15,12 @@ type Node struct {
 	connectionMap        map[string]net.Conn
 	utxos                map[[32]byte]TXOutput
 	own_utxos            utxoStack
+	uncommitedTXs        transactionQueue
+	blockchain           []Block
 	broadcast            chan bool
 	broadcastType        MessageTypeVar
 	initiatedTransaction Transaction
+	minedBlock           Block
 }
 
 // struct containing connected node's PublicKey and Address
@@ -65,6 +68,26 @@ type TXOutput struct {
 	Amount           uint
 }
 
+// struct which represents all of a block's info
+// before it is hashed
+type UnhashedBlock struct {
+	Index        uint
+	Timestamp    int64 // Timestamp := time.now().Unix()
+	PreviousHash [32]byte
+	Transactions [capacity]Transaction
+	Nonce        [32]byte
+}
+
+// struct on which the blockchain is built
+type Block struct {
+	Index        uint
+	Timestamp    int64
+	PreviousHash [32]byte
+	Transactions [capacity]Transaction
+	Nonce        [32]byte
+	Hash         [32]byte
+}
+
 // each message has a type to differentiate treatment
 type MessageTypeVar int
 
@@ -75,6 +98,7 @@ const (
 	NeighborsMessageType
 	NewConnMessageType
 	TransactionMessageType
+	BlockMessageType
 )
 
 // sent on connection closing
@@ -110,6 +134,11 @@ type NewConnMessage struct {
 // sent to share a transaction with other nodes
 type TransactionMessage struct {
 	TX Transaction
+}
+
+// broadcast message containing new mined block
+type BlockMessage struct {
+	B Block
 }
 
 // general message type sent over established connections

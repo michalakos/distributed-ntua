@@ -74,28 +74,38 @@ func (n *Node) monitorConnection(conn net.Conn, conn_id string) {
 			// read message and store node's info
 			log.Println("monitorConnection: Calling receiveSelfInfoMessage")
 			id := n.receiveSelfInfoMessage(m.Data)
+			log.Println("monitorConnection: SelfInfoMessage received from id", id)
 
 			// broadcast updated neighbors' information
 			// TODO: remove sleep
-			time.Sleep(2 * time.Second)
+			// time.Sleep(2 * time.Second)
 			log.Println("monitorConnection: Preparing for broadcast")
 			n.broadcastType = NeighborsMessageType
 			n.broadcast <- true
 
 			// TODO: remove transactions to new nodes
-			time.Sleep(1 * time.Second)
-			log.Println("monitorConnection: Sending tokens to connected node")
-			log.Println("monitorConnection: Creating transaction")
-			utx, err := n.createTransaction(id, 1)
-			if err != nil {
-				log.Fatal("monitorConnection: Invalid transaction")
-			}
+			// time.Sleep(1 * time.Second)
+			// log.Println("monitorConnection: Sending tokens to connected node")
+			// log.Println("monitorConnection: Creating transaction")
+			// utx, err := n.createTransaction(id, 1)
+			// if err != nil {
+			// 	log.Println("monitorConnection: Invalid transaction")
+			// 	continue
+			// }
 
-			log.Println("monitorConnection: Signing transaction")
-			tx := n.signTransaction(utx)
+			// log.Println("monitorConnection: Signing transaction")
+			// tx := n.signTransaction(utx)
 
-			log.Println("monitorConnection: Broadcasting transaction")
-			n.broadcastTransaction(tx)
+			// log.Println("monitorConnection: Broadcasting transaction")
+			// // TODO: remove debugging remains
+			// for i := range n.neighborMap {
+			// 	fmt.Println(i, n.walletBalance(i))
+			// }
+			// n.validateTransaction(tx)
+			// n.broadcastTransaction(tx)
+			// for i := range n.neighborMap {
+			// 	fmt.Println(i, n.walletBalance(i))
+			// }
 
 		// received message containing bootstrap's info about connected nodes
 		case NeighborsMessageType:
@@ -112,8 +122,31 @@ func (n *Node) monitorConnection(conn net.Conn, conn_id string) {
 			log.Println("monitorConnection: Calling receiveTransactionMessage")
 			tx := n.receiveTransactionMessage(m.Data)
 
+			log.Println("monitorConnection: Calling validateTransaction")
 			verified := n.validateTransaction(tx)
 			log.Println("monitorConnection: validation status -> ", verified)
+
+			if verified {
+				n.uncommitedTXs.Push(tx)
+			}
+
+			// TODO: remove debugging remains
+			// for i := range n.neighborMap {
+			// 	fmt.Println(i, n.walletBalance(i))
+			// }
+
+		case BlockMessageType:
+			log.Println("monitorConnection: BlockMessage received")
+			log.Println("monitorConnection: Calling receiveBlockMessage")
+
+			bl := n.receiveBlockMessage(m.Data)
+
+			valid := n.validateBlock(bl)
+
+			if valid {
+				// TODO: update transactions
+				log.Println("monitorConnection: block validated")
+			}
 
 		// unknown message received
 		default:
@@ -154,6 +187,11 @@ func (n *Node) broadcastMessages() {
 					log.Println("broadcastMessages: message type -> TransactionMessage")
 					n.sendTransactionMessage(c, n.initiatedTransaction)
 
+				// broadcast mined block to peers
+				case BlockMessageType:
+					log.Println("broadcastMessages: message type -> BlockMessage")
+					n.sendBlockMessage(c, n.minedBlock)
+
 				default:
 					log.Fatal("broadcastMessages: Trying to broadcast unknown message type")
 				}
@@ -186,6 +224,26 @@ func (n *Node) acceptConnectionsBootstrap(ln net.Listener) {
 		// send welcome message with assigned id to node
 		log.Printf("acceptConnectionsBootstrap: Sending WelcomeMessage to %d", currentID)
 		n.sendWelcomeMessage(conn, "id"+strconv.Itoa(currentID))
+
+		if currentID == clients {
+			time.Sleep(time.Second * 2)
+			genesis := n.createGenesisBlock()
+			n.broadcastBlock(genesis)
+
+			for id := range n.neighborMap {
+				if id == n.id {
+					continue
+				}
+
+				utx, err := n.createTransaction(id, 100)
+				if err != nil {
+					log.Println("acceptConnectionsBootstrap: error creating first transaction to", id)
+					continue
+				}
+				tx := n.signTransaction(utx)
+				n.broadcastTransaction(tx)
+			}
+		}
 
 		currentID++
 	}

@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net"
 )
@@ -141,6 +142,25 @@ func (n *Node) sendTransactionMessage(conn net.Conn, tx Transaction) {
 	sendMessage(conn, m)
 }
 
+func (n *Node) sendBlockMessage(conn net.Conn, bl Block) {
+	log.Println("sendBlockMessage: Creating message")
+
+	bm := BlockMessage{bl}
+
+	bmb, err := json.Marshal(bm)
+	if err != nil {
+		log.Println("sendBlockMessage:", err)
+	}
+
+	m := Message{
+		MessageType: BlockMessageType,
+		Data:        bmb,
+	}
+
+	log.Println("sendBlockMessage: Calling sendMessage")
+	sendMessage(conn, m)
+}
+
 // listen to connection and get messages
 // return Message struct
 func receiveMessage(conn net.Conn) (Message, error) {
@@ -233,7 +253,19 @@ func (n *Node) receiveTransactionMessage(txmb []byte) Transaction {
 		log.Println("receiveTransactionMessage: ", err)
 	}
 
+	fmt.Println("receiveTransactionMessage:", txm.TX.Amount)
 	return txm.TX
+}
+
+func (n *Node) receiveBlockMessage(bmb []byte) Block {
+	var bm BlockMessage
+	err := json.Unmarshal(bmb, &bm)
+	if err != nil {
+		log.Println("receiveBlockMessage:", err)
+	}
+
+	fmt.Println(bm.B.Index)
+	return bm.B
 }
 
 // received on new connections with nodes that aren't the bootstrap

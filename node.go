@@ -8,8 +8,11 @@ import (
 	"time"
 )
 
+const capacity = 2
+const clients = 3
+const difficulty = 4
+
 // TODO:
-// create genesis block
 // transfer funds to each connected client
 func main() {
 	if len(os.Args) < 2 {
