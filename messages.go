@@ -2,8 +2,8 @@ package main
 
 import (
 	"bufio"
-	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net"
 )
@@ -13,7 +13,7 @@ func sendMessage(conn net.Conn, m Message) {
 	// encode message as json
 	mb, _ := json.Marshal(m)
 
-	log.Printf("sendMessage: Sending message to %s\n", conn.RemoteAddr())
+	// log.Printf("sendMessage: Sending message to %s\n", conn.RemoteAddr())
 	// log.Printf("sendMessage: Message sent: %s\n", mb)
 
 	// send message + "\n" as messages are separated by newline characters
@@ -28,13 +28,16 @@ func (n *Node) sendWelcomeMessage(conn net.Conn, id string) {
 
 	// add new Neighbor
 	n.neighborMap[id] = new(Neighbor)
-	n.utxos[id] = make(map[[32]byte]TXOutput)
 
 	// create WelcomeMessage with assigned id
 	wm := WelcomeMessage{id}
 
 	// encode message as json and create Message to be sent
-	wmb, _ := json.Marshal(wm)
+	wmb, err := json.Marshal(wm)
+	if err != nil {
+		log.Fatal("sendWelcomeMessage:", err)
+	}
+
 	m := Message{WelcomeMessageType, wmb}
 
 	// send created Message
@@ -74,7 +77,10 @@ func (n *Node) sendSelfInfoMessage(conn net.Conn) {
 		Address:   n.address}
 
 	// encode message as json
-	simb, _ := json.Marshal(sim)
+	simb, err := json.Marshal(sim)
+	if err != nil {
+		log.Fatal("sendSelfInfoMessage:", err)
+	}
 
 	// create Message containing encoded message
 	m := Message{
@@ -118,7 +124,7 @@ func (n *Node) sendNeighborMessage(conn net.Conn) {
 
 // send message containing a transaction
 func (n *Node) sendTransactionMessage(conn net.Conn, tx Transaction) {
-	log.Println("sendTransactionMessage: Creating message")
+	// log.Println("sendTransactionMessage: Creating message")
 
 	txm := TransactionMessage{tx}
 
@@ -132,7 +138,54 @@ func (n *Node) sendTransactionMessage(conn net.Conn, tx Transaction) {
 		Data:        txmb,
 	}
 
-	log.Println("sendTransactionMessage: Calling sendMessage")
+	// log.Println("sendTransactionMessage: Calling sendMessage")
+	sendMessage(conn, m)
+}
+
+func (n *Node) sendBlockMessage(conn net.Conn, bl Block) {
+	// log.Println("sendBlockMessage: Creating message")
+
+	bm := BlockMessage{bl}
+
+	bmb, err := json.Marshal(bm)
+	if err != nil {
+		log.Println("sendBlockMessage:", err)
+	}
+
+	m := Message{
+		MessageType: BlockMessageType,
+		Data:        bmb,
+	}
+
+	// log.Println("sendBlockMessage: Calling sendMessage")
+	sendMessage(conn, m)
+}
+
+func (n *Node) sendResolveRequestMessage(conn net.Conn, rrm ResolveRequestMessage) {
+	rrmb, err := json.Marshal(rrm)
+	if err != nil {
+		log.Println("sendResolveRequestMessage:", err)
+	}
+
+	m := Message{
+		MessageType: ResolveRequestMessageType,
+		Data:        rrmb,
+	}
+
+	sendMessage(conn, m)
+}
+
+func (n *Node) sendResolveResponseMessage(conn net.Conn, rrm ResolveResponseMessage) {
+	rrmb, err := json.Marshal(rrm)
+	if err != nil {
+		log.Println("sendResolveResponseMessage:", err)
+	}
+
+	m := Message{
+		MessageType: ResolveResponseMessageType,
+		Data:        rrmb,
+	}
+
 	sendMessage(conn, m)
 }
 
@@ -176,29 +229,6 @@ func (n *Node) receiveNeighborsMessage(nmb []byte) {
 			// if this is a new node create Neighbor struct and store info
 		} else {
 			n.neighborMap[k] = &Neighbor{Address: v.Address, PublicKey: v.PublicKey}
-			n.utxos[k] = make(map[[32]byte]TXOutput)
-
-			// TODO: remove utxo addition - used for testing
-			if k == "id0" {
-				n.utxos[k][sha256.Sum256([]byte("hey1"))] = TXOutput{
-					ID:               sha256.Sum256([]byte("hey1")),
-					TransactionID:    sha256.Sum256([]byte("hey")),
-					RecipientAddress: n.publicKey,
-					Amount:           5,
-				}
-				n.utxos[k][sha256.Sum256([]byte("hey2"))] = TXOutput{
-					ID:               sha256.Sum256([]byte("hey2")),
-					TransactionID:    sha256.Sum256([]byte("hey")),
-					RecipientAddress: n.publicKey,
-					Amount:           2,
-				}
-				n.utxos[k][sha256.Sum256([]byte("hey3"))] = TXOutput{
-					ID:               sha256.Sum256([]byte("hey3")),
-					TransactionID:    sha256.Sum256([]byte("hey")),
-					RecipientAddress: n.publicKey,
-					Amount:           19,
-				}
-			}
 		}
 	}
 
@@ -251,7 +281,80 @@ func (n *Node) receiveTransactionMessage(txmb []byte) Transaction {
 		log.Println("receiveTransactionMessage: ", err)
 	}
 
+	fmt.Println("receiveTransactionMessage:", txm.TX.Amount)
 	return txm.TX
+}
+
+func (n *Node) receiveBlockMessage(bmb []byte) Block {
+	var bm BlockMessage
+	err := json.Unmarshal(bmb, &bm)
+	if err != nil {
+		log.Println("receiveBlockMessage:", err)
+	}
+
+	fmt.Println("received block index:", bm.B.Index)
+	return bm.B
+}
+
+func (n *Node) receiveResolveRequestMessage(rrmb []byte) ResolveResponseMessage {
+	var rrm ResolveRequestMessage
+	err := json.Unmarshal(rrmb, &rrm)
+	if err != nil {
+		log.Println("receiveResolveRequestMessage:", err)
+	}
+
+	if rrm.ChainSize < uint(len(n.blockchain)) {
+		blocks := make([]Block, 0)
+
+		var i int
+		for i = range rrm.Hashes {
+			if rrm.Hashes[i] != n.blockchain[i].Hash {
+				break
+			}
+		}
+		for ; i < len(n.blockchain); i++ {
+			blocks = append(blocks, n.blockchain[i])
+		}
+
+		resM := ResolveResponseMessage{
+			Blocks: blocks,
+		}
+
+		return resM
+	}
+
+	return ResolveResponseMessage{}
+}
+
+func (n *Node) receiveResolveResponseMessage(rrmb []byte) {
+	var rrm ResolveResponseMessage
+	err := json.Unmarshal(rrmb, &rrm)
+	if err != nil {
+		log.Println("receiveResolveResponseMessage:", err)
+	}
+
+	first_index := rrm.Blocks[0].Index
+	last_index := rrm.Blocks[len(rrm.Blocks)-1].Index
+
+	if last_index > uint(len(n.blockchain)) {
+		temp := make([]Block, first_index)
+		copy(temp[0:first_index], n.blockchain)
+
+		// copy(n.blockchain[0:first_index], n.blockchain[0:first_index])
+		fmt.Println("receive.. should be ", first_index, "is", len(temp))
+
+		temp = append(temp, rrm.Blocks...)
+		fmt.Println("receive.. should be", last_index+1, "is", len(temp))
+
+		n.blockchain = make([]Block, last_index+1)
+		copy(n.blockchain, temp)
+	}
+	fmt.Println("receive.. chain len", len(n.blockchain))
+	for _, bl := range n.blockchain {
+		fmt.Println("receiveresolve...: index", bl.Index)
+	}
+
+	n.validateChain()
 }
 
 // received on new connections with nodes that aren't the bootstrap

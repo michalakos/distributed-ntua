@@ -2,14 +2,24 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
+	"os"
 	"time"
 )
 
+const capacity = 2
+const clients = 4
+const difficulty = 5
+
 // TODO:
-// create genesis block
 // transfer funds to each connected client
 func main() {
+	if len(os.Args) < 2 {
+		fmt.Println("Try './node.exe -h' for help")
+		os.Exit(0)
+	}
+
 	var thisNode Node
 
 	localAddr := flag.String("local", "localhost:50001", "local node's [IP:port]")
@@ -34,8 +44,15 @@ func main() {
 		log.Printf("Connecting to bootstrap at %s\n", *remoteAddr)
 
 		go thisNode.nodeStart(*localAddr)
-		thisNode.connectionStart("id0", *remoteAddr)
+		go thisNode.connectionStart("id0", *remoteAddr)
 
+		time.Sleep(time.Second * 15)
+		thisNode.sendCoins("id0", 1)
+		thisNode.sendCoins("id0", 1)
+		thisNode.sendCoins("id0", 1)
+		thisNode.sendCoins("id0", 1)
+		// time.Sleep(time.Second * 20)
+		// thisNode.validateChain()
 		time.Sleep(time.Duration(1<<63 - 1))
 	}
 }
