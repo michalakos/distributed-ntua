@@ -9,8 +9,8 @@ import (
 )
 
 const capacity = 2
-const clients = 3
-const difficulty = 4
+const clients = 4
+const difficulty = 5
 
 // TODO:
 // transfer funds to each connected client
@@ -44,8 +44,15 @@ func main() {
 		log.Printf("Connecting to bootstrap at %s\n", *remoteAddr)
 
 		go thisNode.nodeStart(*localAddr)
-		thisNode.connectionStart("id0", *remoteAddr)
+		go thisNode.connectionStart("id0", *remoteAddr)
 
+		time.Sleep(time.Second * 15)
+		thisNode.sendCoins("id0", 1)
+		thisNode.sendCoins("id0", 1)
+		thisNode.sendCoins("id0", 1)
+		thisNode.sendCoins("id0", 1)
+		// time.Sleep(time.Second * 20)
+		// thisNode.validateChain()
 		time.Sleep(time.Duration(1<<63 - 1))
 	}
 }

@@ -7,20 +7,39 @@ import (
 
 // struct representing a client
 type Node struct {
-	id                   string
-	privateKey           rsa.PrivateKey
-	publicKey            rsa.PublicKey
-	address              string
-	neighborMap          map[string]*Neighbor
-	connectionMap        map[string]net.Conn
-	utxos                map[[32]byte]TXOutput
-	own_utxos            utxoStack
-	uncommitedTXs        transactionQueue
-	blockchain           []Block
+	// node's private information
+	id         string
+	privateKey rsa.PrivateKey
+	publicKey  rsa.PublicKey
+	address    string
+	wait       bool
+
+	// info about system
+	neighborMap   map[string]*Neighbor
+	connectionMap map[string]net.Conn
+
+	// current blockchain
+	blockchain []Block
+
+	// info about state of blockchain
+	utxos      map[[32]byte]TXOutput
+	own_utxos  map[[32]byte]TXOutput
+	tx_queue   transactionQueue
+	unused_txs map[[32]byte]bool
+
+	// copy of blockchain state with changes not yet commited to ledger
+	// used for selecting transactions to add to a block before starting mining
+	utxos_uncommited     map[[32]byte]TXOutput
+	own_utxos_uncommited utxoStack
+	tx_queue_uncommited  transactionQueue
+
+	// auxiliary fields for message broadcasting
 	broadcast            chan bool
 	broadcastType        MessageTypeVar
 	initiatedTransaction Transaction
 	minedBlock           Block
+	resReqM              ResolveRequestMessage
+	// resResM              ResolveResponseMessage
 }
 
 // struct containing connected node's PublicKey and Address
@@ -99,6 +118,8 @@ const (
 	NewConnMessageType
 	TransactionMessageType
 	BlockMessageType
+	ResolveRequestMessageType
+	ResolveResponseMessageType
 )
 
 // sent on connection closing
@@ -139,6 +160,19 @@ type TransactionMessage struct {
 // broadcast message containing new mined block
 type BlockMessage struct {
 	B Block
+}
+
+// broadcast message containing length of blockchain
+// and the blocks' hashes
+// if another node has longer blockchain it sends the missing/different blocks
+type ResolveRequestMessage struct {
+	ChainSize uint
+	Hashes    [][32]byte
+}
+
+// response message to ResolveRequestMessage containing different/new blocks
+type ResolveResponseMessage struct {
+	Blocks []Block
 }
 
 // general message type sent over established connections

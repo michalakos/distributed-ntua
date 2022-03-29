@@ -83,30 +83,6 @@ func (n *Node) monitorConnection(conn net.Conn, conn_id string) {
 			n.broadcastType = NeighborsMessageType
 			n.broadcast <- true
 
-			// TODO: remove transactions to new nodes
-			// time.Sleep(1 * time.Second)
-			// log.Println("monitorConnection: Sending tokens to connected node")
-			// log.Println("monitorConnection: Creating transaction")
-			// utx, err := n.createTransaction(id, 1)
-			// if err != nil {
-			// 	log.Println("monitorConnection: Invalid transaction")
-			// 	continue
-			// }
-
-			// log.Println("monitorConnection: Signing transaction")
-			// tx := n.signTransaction(utx)
-
-			// log.Println("monitorConnection: Broadcasting transaction")
-			// // TODO: remove debugging remains
-			// for i := range n.neighborMap {
-			// 	fmt.Println(i, n.walletBalance(i))
-			// }
-			// n.validateTransaction(tx)
-			// n.broadcastTransaction(tx)
-			// for i := range n.neighborMap {
-			// 	fmt.Println(i, n.walletBalance(i))
-			// }
-
 		// received message containing bootstrap's info about connected nodes
 		case NeighborsMessageType:
 			log.Println("monitorConnection: NeighborsMessage received")
@@ -122,17 +98,16 @@ func (n *Node) monitorConnection(conn net.Conn, conn_id string) {
 			log.Println("monitorConnection: Calling receiveTransactionMessage")
 			tx := n.receiveTransactionMessage(m.Data)
 
-			log.Println("monitorConnection: Calling validateTransaction")
-			verified := n.validateTransaction(tx)
-			log.Println("monitorConnection: validation status -> ", verified)
+			n.tx_queue.Push(tx)
+			n.tx_queue_uncommited.Push(tx)
+			n.unused_txs[tx.TransactionID] = true
 
-			if verified {
-				n.uncommitedTXs.Push(tx)
-			}
+			// log.Println("monitorConnection: Calling validateTransaction")
+			// verified := n.validateTransaction(tx)
+			// log.Println("monitorConnection: validation status -> ", verified)
 
-			// TODO: remove debugging remains
-			// for i := range n.neighborMap {
-			// 	fmt.Println(i, n.walletBalance(i))
+			// if verified {
+			// 	n.non_ledger_transactions.Push(tx)
 			// }
 
 		case BlockMessageType:
@@ -144,9 +119,17 @@ func (n *Node) monitorConnection(conn net.Conn, conn_id string) {
 			valid := n.validateBlock(bl)
 
 			if valid {
-				// TODO: update transactions
-				log.Println("monitorConnection: block validated")
+				log.Println("monitorConnection: block validated, new chain length:", len(n.blockchain))
 			}
+
+		case ResolveRequestMessageType:
+			log.Println("monitorConnection: ResolveRequestMessage received")
+			resm := n.receiveResolveRequestMessage(m.Data)
+			n.sendResolveResponseMessage(conn, resm)
+
+		case ResolveResponseMessageType:
+			log.Println("monitorConnection: ResolveResponseMessage received")
+			n.receiveResolveResponseMessage(m.Data)
 
 		// unknown message received
 		default:
@@ -160,15 +143,15 @@ func (n *Node) broadcastMessages() {
 	for {
 		// wait until channel receives "true" value
 		flag := <-n.broadcast
-		log.Println("broadcastMessages: broadcast channel received value")
+		// log.Println("broadcastMessages: broadcast channel received value")
 
 		if flag {
 			// TODO: add lock for sending messages?
-			log.Println("broadcastMessages: Broadcasting message")
+			// log.Println("broadcastMessages: Broadcasting message")
 
 			// send message to each connected node
-			for id, c := range n.connectionMap {
-				log.Printf("broadcastMessages: Broadcasting to node %s", id)
+			for _, c := range n.connectionMap {
+				// log.Printf("broadcastMessages: Broadcasting to node %s", id)
 
 				// decide what to broadcast based on broadcastType
 				switch n.broadcastType {
@@ -179,23 +162,31 @@ func (n *Node) broadcastMessages() {
 
 				// broadcast neighbors' information
 				case NeighborsMessageType:
-					log.Println("broadcastMessages: message type -> NeighborMessage")
+					// log.Println("broadcastMessages: message type -> NeighborMessage")
 					n.sendNeighborMessage(c)
 
 				// broadcast transaction initiated from this node
 				case TransactionMessageType:
-					log.Println("broadcastMessages: message type -> TransactionMessage")
+					// log.Println("broadcastMessages: message type -> TransactionMessage")
 					n.sendTransactionMessage(c, n.initiatedTransaction)
 
 				// broadcast mined block to peers
 				case BlockMessageType:
-					log.Println("broadcastMessages: message type -> BlockMessage")
+					// log.Println("broadcastMessages: message type -> BlockMessage")
 					n.sendBlockMessage(c, n.minedBlock)
+
+				case ResolveRequestMessageType:
+					time.Sleep(time.Millisecond * 50)
+					n.sendResolveRequestMessage(c, n.resReqM)
+
+				// case ResolveResponseMessageType:
+				// 	n.sendResolveResponseMessage(c, n.resResM)
 
 				default:
 					log.Fatal("broadcastMessages: Trying to broadcast unknown message type")
 				}
 			}
+			n.wait = false
 		}
 	}
 }
@@ -235,13 +226,20 @@ func (n *Node) acceptConnectionsBootstrap(ln net.Listener) {
 					continue
 				}
 
-				utx, err := n.createTransaction(id, 100)
-				if err != nil {
-					log.Println("acceptConnectionsBootstrap: error creating first transaction to", id)
-					continue
+				flag := n.sendCoins(id, 100)
+				if !flag {
+					log.Print("Couldn't create first transaction to node", id)
 				}
-				tx := n.signTransaction(utx)
-				n.broadcastTransaction(tx)
+				// utx, err := n.createTransaction(id, 100)
+				// if err != nil {
+				// 	log.Println("acceptConnectionsBootstrap: error creating first transaction to", id)
+				// 	continue
+				// }
+				// tx := n.signTransaction(utx)
+				// n.broadcastTransaction(tx)
+
+				// n.tx_queue.Push(tx)
+				// n.tx_queue_uncommited.Push(tx)
 			}
 		}
 

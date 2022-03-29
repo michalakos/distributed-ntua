@@ -17,6 +17,13 @@ func NewStack() *utxoStack {
 	return &utxoStack{lock: sync.Mutex{}, utxos: make([]TXOutput, 0)}
 }
 
+func (s *utxoStack) Copy(original *utxoStack) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	s.utxos = make([]TXOutput, len(original.utxos))
+	copy(s.utxos, original.utxos)
+}
+
 // returns the size of the stack
 func (s *utxoStack) Size() int {
 	return len(s.utxos)

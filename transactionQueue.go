@@ -17,6 +17,15 @@ func NewQueue() *transactionQueue {
 	return &transactionQueue{lock: sync.Mutex{}, txs: make([]Transaction, 0)}
 }
 
+// copy original stack onto this object's
+func (s *transactionQueue) Copy(original *transactionQueue) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	s.txs = make([]Transaction, len(original.txs))
+	copy(s.txs, original.txs)
+}
+
 // returns the size of the stack
 func (s *transactionQueue) Size() int {
 	return len(s.txs)
