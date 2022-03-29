@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -34,9 +36,16 @@ func main() {
 		log.Printf("Starting bootstrap node in %s\n", *localAddr)
 
 		thisNode.id = "id0"
-		thisNode.bootstrapStart(*localAddr)
+		go thisNode.bootstrapStart(*localAddr)
 
-		time.Sleep(time.Duration(1<<63 - 1))
+		for {
+			reader := bufio.NewReader(os.Stdin)
+			text, _ := reader.ReadString('\n')
+			words := strings.Fields(text)
+			thisNode.cli(words)
+		}
+
+		// time.Sleep(time.Duration(1<<63 - 1))
 
 	} else {
 
@@ -53,6 +62,13 @@ func main() {
 		thisNode.sendCoins("id0", 1)
 		// time.Sleep(time.Second * 20)
 		// thisNode.validateChain()
-		time.Sleep(time.Duration(1<<63 - 1))
+		for {
+			reader := bufio.NewReader(os.Stdin)
+			text, _ := reader.ReadString('\n')
+			words := strings.Fields(text)
+			thisNode.cli(words)
+		}
+
+		// time.Sleep(time.Duration(1<<63 - 1))
 	}
 }

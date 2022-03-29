@@ -898,3 +898,26 @@ func (n *Node) resolveConflict() {
 	n.broadcastType = ResolveRequestMessageType
 	n.broadcast <- true
 }
+
+func (n *Node) viewTransactions() {
+	bl := n.blockchain[len(n.blockchain)-1]
+	fmt.Println("")
+
+	for i, tx := range bl.Transactions {
+		fmt.Println("Transaction", i)
+		fmt.Println("Amount:", tx.Amount)
+
+		var sender, receiver string
+		for id, nghb := range n.neighborMap {
+			if compare(nghb.PublicKey, tx.ReceiverAddress) {
+				receiver = id
+			} else if compare(nghb.PublicKey, tx.SenderAddress) {
+				sender = id
+			}
+		}
+
+		fmt.Println("From:", sender)
+		fmt.Println("To:", receiver)
+		fmt.Println("")
+	}
+}
