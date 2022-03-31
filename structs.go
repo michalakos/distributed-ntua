@@ -23,14 +23,14 @@ type Node struct {
 
 	// info about state of blockchain
 	utxos      map[[32]byte]TXOutput
-	own_utxos  map[[32]byte]TXOutput
+	own_utxos  map[[32]byte]bool
 	tx_queue   transactionQueue
 	unused_txs map[[32]byte]bool
 
 	// copy of blockchain state with changes not yet commited to ledger
 	// used for selecting transactions to add to a block before starting mining
 	utxos_uncommited     map[[32]byte]TXOutput
-	own_utxos_uncommited utxoStack
+	own_utxos_uncommited utxoQueue
 	tx_queue_uncommited  transactionQueue
 
 	// auxiliary fields for message broadcasting
@@ -39,7 +39,6 @@ type Node struct {
 	initiatedTransaction Transaction
 	minedBlock           Block
 	resReqM              ResolveRequestMessage
-	// resResM              ResolveResponseMessage
 }
 
 // struct containing connected node's PublicKey and Address

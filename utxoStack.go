@@ -7,17 +7,17 @@ import (
 
 // stack of Unspent Transaction Outputs
 // uses mutex to ensure no concurrent access
-type utxoStack struct {
+type utxoQueue struct {
 	lock  sync.Mutex
 	utxos []TXOutput
 }
 
 // create new stack
-func NewStack() *utxoStack {
-	return &utxoStack{lock: sync.Mutex{}, utxos: make([]TXOutput, 0)}
+func Newqueue() *utxoQueue {
+	return &utxoQueue{lock: sync.Mutex{}, utxos: make([]TXOutput, 0)}
 }
 
-func (s *utxoStack) Copy(original *utxoStack) {
+func (s *utxoQueue) Copy(original *utxoQueue) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	s.utxos = make([]TXOutput, len(original.utxos))
@@ -25,12 +25,12 @@ func (s *utxoStack) Copy(original *utxoStack) {
 }
 
 // returns the size of the stack
-func (s *utxoStack) Size() int {
+func (s *utxoQueue) Size() int {
 	return len(s.utxos)
 }
 
 // push TXOutput to the stack
-func (s *utxoStack) Push(utxo TXOutput) {
+func (s *utxoQueue) Push(utxo TXOutput) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
@@ -39,7 +39,7 @@ func (s *utxoStack) Push(utxo TXOutput) {
 
 // returns TXOutpus last added to the stack if not empty
 // if empty error is not nil
-func (s *utxoStack) Pop() (TXOutput, error) {
+func (s *utxoQueue) Pop() (TXOutput, error) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
@@ -48,7 +48,7 @@ func (s *utxoStack) Pop() (TXOutput, error) {
 		return TXOutput{}, errors.New("empty_utxoStack")
 	}
 
-	res := s.utxos[l-1]
-	s.utxos = s.utxos[:l-1]
+	res := s.utxos[0]
+	s.utxos = s.utxos[1:]
 	return res, nil
 }

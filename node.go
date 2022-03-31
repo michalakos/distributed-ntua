@@ -1,10 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
-	"log"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -25,34 +26,45 @@ func main() {
 	localAddr := flag.String("local", "localhost:50001", "local node's [IP:port]")
 	remoteAddr := flag.String("remote", "localhost:50000", "bootstrap node's [IP:port]")
 	bootstrap := flag.Bool("bootstrap", false, "declare node as bootstrap")
+
 	flag.Parse()
 
 	thisNode.Setup(*localAddr)
 
 	if *bootstrap {
-
-		log.Printf("Starting bootstrap node in %s\n", *localAddr)
+		go thisNode.collectTransactions()
 
 		thisNode.id = "id0"
-		thisNode.bootstrapStart(*localAddr)
+		go thisNode.bootstrapStart(*localAddr)
 
-		time.Sleep(time.Duration(1<<63 - 1))
+		for len(thisNode.blockchain) == 0 {
+			continue
+		}
+
+		for {
+			reader := bufio.NewReader(os.Stdin)
+			text, _ := reader.ReadString('\n')
+			words := strings.Fields(text)
+			thisNode.cli(words)
+		}
 
 	} else {
-
-		log.Printf("Starting node in %s\n", *localAddr)
-		log.Printf("Connecting to bootstrap at %s\n", *remoteAddr)
+		go thisNode.collectTransactions()
 
 		go thisNode.nodeStart(*localAddr)
 		go thisNode.connectionStart("id0", *remoteAddr)
 
-		time.Sleep(time.Second * 15)
-		thisNode.sendCoins("id0", 1)
-		thisNode.sendCoins("id0", 1)
-		thisNode.sendCoins("id0", 1)
-		thisNode.sendCoins("id0", 1)
-		// time.Sleep(time.Second * 20)
-		// thisNode.validateChain()
-		time.Sleep(time.Duration(1<<63 - 1))
+		for len(thisNode.blockchain) == 0 {
+			continue
+		}
+		time.Sleep(time.Second * 20 * clients)
+
+		for {
+			reader := bufio.NewReader(os.Stdin)
+			text, _ := reader.ReadString('\n')
+			words := strings.Fields(text)
+			fmt.Println(words)
+			thisNode.cli(words)
+		}
 	}
 }

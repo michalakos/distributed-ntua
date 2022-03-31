@@ -9,13 +9,11 @@ import (
 
 // establish new connection to node with known id and address
 func (n *Node) connectionStart(id string, remoteAddr string) {
-	log.Printf("connectionStart: Attempting to connect to %s\n", id)
 
 	conn, err := net.Dial("tcp", remoteAddr)
 	if err != nil {
 		log.Fatal("connectionStart:", err)
 	}
-	log.Printf("connectionStart: Connected to %s\n", id)
 
 	// send NewConnMessage to give id to connection receiver
 	// only if target isn't bootstrap
@@ -24,12 +22,9 @@ func (n *Node) connectionStart(id string, remoteAddr string) {
 	}
 
 	// add connection to map of established connections
-	log.Printf("connectionStart: Adding connection to connectionMap\n")
 	n.connectionMap[id] = net.Conn(conn)
 
 	// monitor this connection for incoming messages
-	log.Printf("connectionStart: Launching monitorConnection for connection with %s\n", id)
-
 	n.monitorConnection(conn, id)
 }
 
@@ -38,9 +33,8 @@ func (n *Node) monitorConnection(conn net.Conn, conn_id string) {
 	for {
 		// wait until a message is read
 		m, err := receiveMessage(conn)
-		log.Printf("monitorConnection: received message from node %s", conn_id)
 		if err != nil {
-			log.Println("monitorConnection:", err)
+			return
 		}
 
 		// each message received should be of type Message
@@ -49,91 +43,57 @@ func (n *Node) monitorConnection(conn net.Conn, conn_id string) {
 
 		// no message - sent on connection shutdown
 		case NullMessageType:
-			log.Println("monitorConnection: NullMessage received. Closing connection")
-			delete(n.neighborMap, conn_id)
-			delete(n.connectionMap, conn_id)
-			conn.Close()
-			return
+			continue
 
 		// received welcome from bootstrap with assigned id (regular nodes)
 		case WelcomeMessageType:
-			log.Println("monitorConnection: WelcomeMessage received")
-
 			// read incoming message and updating own id
-			log.Println("monitorConnection: Calling receiveWelcomeMessage")
 			n.receiveWelcomeMessage(m.Data)
 
 			// send public key and address to the bootstrap node
-			log.Println("monitorConnection: Calling sendSelfInfoMessage")
 			n.sendSelfInfoMessage(conn)
 
 		// received message with node's information (bootstrap node)
 		case SelfInfoMessageType:
-			log.Println("monitorConnection: SelfInfoMessage received")
-
 			// read message and store node's info
-			log.Println("monitorConnection: Calling receiveSelfInfoMessage")
-			id := n.receiveSelfInfoMessage(m.Data)
-			log.Println("monitorConnection: SelfInfoMessage received from id", id)
+			_ = n.receiveSelfInfoMessage(m.Data)
 
 			// broadcast updated neighbors' information
-			// TODO: remove sleep
-			// time.Sleep(2 * time.Second)
-			log.Println("monitorConnection: Preparing for broadcast")
 			n.broadcastType = NeighborsMessageType
 			n.broadcast <- true
 
 		// received message containing bootstrap's info about connected nodes
 		case NeighborsMessageType:
-			log.Println("monitorConnection: NeighborsMessage received")
-
 			// read message and update own neighbors' info
-			log.Println("monitorConnection: Calling receiveNeighborMessage")
 			n.receiveNeighborsMessage(m.Data)
 
-		// TODO: add valid transactions to block and check if block is completed
 		case TransactionMessageType:
-			log.Println("monitorConnection: TransactionMessage received")
-
-			log.Println("monitorConnection: Calling receiveTransactionMessage")
 			tx := n.receiveTransactionMessage(m.Data)
 
 			n.tx_queue.Push(tx)
 			n.tx_queue_uncommited.Push(tx)
 			n.unused_txs[tx.TransactionID] = true
 
-			// log.Println("monitorConnection: Calling validateTransaction")
-			// verified := n.validateTransaction(tx)
-			// log.Println("monitorConnection: validation status -> ", verified)
-
-			// if verified {
-			// 	n.non_ledger_transactions.Push(tx)
-			// }
-
 		case BlockMessageType:
-			log.Println("monitorConnection: BlockMessage received")
-			log.Println("monitorConnection: Calling receiveBlockMessage")
-
+			for n.wait {
+				continue
+			}
 			bl := n.receiveBlockMessage(m.Data)
 
-			valid := n.validateBlock(bl)
-
-			if valid {
+			if !n.wait && n.validateBlock(bl) {
 				log.Println("monitorConnection: block validated, new chain length:", len(n.blockchain))
 			}
 
 		case ResolveRequestMessageType:
-			log.Println("monitorConnection: ResolveRequestMessage received")
 			resm := n.receiveResolveRequestMessage(m.Data)
 			n.sendResolveResponseMessage(conn, resm)
 
 		case ResolveResponseMessageType:
-			log.Println("monitorConnection: ResolveResponseMessage received")
 			n.receiveResolveResponseMessage(m.Data)
 
 		// unknown message received
 		default:
-			log.Println("monitorConnection: Unrecognized message type")
+			continue
 		}
 	}
 }
@@ -143,15 +103,11 @@ func (n *Node) broadcastMessages() {
 	for {
 		// wait until channel receives "true" value
 		flag := <-n.broadcast
-		// log.Println("broadcastMessages: broadcast channel received value")
 
 		if flag {
-			// TODO: add lock for sending messages?
-			// log.Println("broadcastMessages: Broadcasting message")
 
 			// send message to each connected node
 			for _, c := range n.connectionMap {
-				// log.Printf("broadcastMessages: Broadcasting to node %s", id)
 
 				// decide what to broadcast based on broadcastType
 				switch n.broadcastType {
@@ -162,31 +118,25 @@ func (n *Node) broadcastMessages() {
 
 				// broadcast neighbors' information
 				case NeighborsMessageType:
-					// log.Println("broadcastMessages: message type -> NeighborMessage")
 					n.sendNeighborMessage(c)
 
 				// broadcast transaction initiated from this node
 				case TransactionMessageType:
-					// log.Println("broadcastMessages: message type -> TransactionMessage")
 					n.sendTransactionMessage(c, n.initiatedTransaction)
 
 				// broadcast mined block to peers
 				case BlockMessageType:
-					// log.Println("broadcastMessages: message type -> BlockMessage")
 					n.sendBlockMessage(c, n.minedBlock)
 
 				case ResolveRequestMessageType:
 					time.Sleep(time.Millisecond * 50)
 					n.sendResolveRequestMessage(c, n.resReqM)
-
-				// case ResolveResponseMessageType:
-				// 	n.sendResolveResponseMessage(c, n.resResM)
+					time.Sleep(time.Millisecond * 50)
 
 				default:
 					log.Fatal("broadcastMessages: Trying to broadcast unknown message type")
 				}
 			}
-			n.wait = false
 		}
 	}
 }
@@ -196,28 +146,24 @@ func (n *Node) broadcastMessages() {
 func (n *Node) acceptConnectionsBootstrap(ln net.Listener) {
 	currentID := 1
 
-	for {
+	for currentID < clients+1 {
 		// accept incoming connections
 		conn, err := ln.Accept()
 		if err != nil {
-			log.Println("acceptConnectionsBootstrap:", err)
+			continue
 		}
 
-		log.Println("acceptConnectionsBootstrap: Received connection")
-
 		// store connection's information
-		log.Println("acceptConnectionsBootstrap: Adding connection to map and launching monitorConnection")
 		n.connectionMap["id"+strconv.Itoa(currentID)] = conn
 
 		// listen to connection for incoming messages
 		go n.monitorConnection(conn, "id"+strconv.Itoa(currentID))
 
 		// send welcome message with assigned id to node
-		log.Printf("acceptConnectionsBootstrap: Sending WelcomeMessage to %d", currentID)
 		n.sendWelcomeMessage(conn, "id"+strconv.Itoa(currentID))
 
 		if currentID == clients {
-			time.Sleep(time.Second * 2)
+			time.Sleep(time.Millisecond * 100)
 			genesis := n.createGenesisBlock()
 			n.broadcastBlock(genesis)
 
@@ -225,21 +171,11 @@ func (n *Node) acceptConnectionsBootstrap(ln net.Listener) {
 				if id == n.id {
 					continue
 				}
-
-				flag := n.sendCoins(id, 100)
-				if !flag {
-					log.Print("Couldn't create first transaction to node", id)
+				for i := 0; i < 10; i++ {
+					if !n.sendCoins(id, 10) {
+						log.Print("Couldn't create first transaction to node", id)
+					}
 				}
-				// utx, err := n.createTransaction(id, 100)
-				// if err != nil {
-				// 	log.Println("acceptConnectionsBootstrap: error creating first transaction to", id)
-				// 	continue
-				// }
-				// tx := n.signTransaction(utx)
-				// n.broadcastTransaction(tx)
-
-				// n.tx_queue.Push(tx)
-				// n.tx_queue_uncommited.Push(tx)
 			}
 		}
 
@@ -249,19 +185,16 @@ func (n *Node) acceptConnectionsBootstrap(ln net.Listener) {
 
 // accept incoming connections and storing information
 func (n *Node) acceptConnections(ln net.Listener) {
-	for {
+	for count := 0; count < clients-1; count++ {
 		conn, err := ln.Accept()
-		log.Printf("acceptConnections: Received connection from %s\n", conn.RemoteAddr())
 		if err != nil {
-			log.Println("acceptConnections:", err)
+			continue
 		}
-
 		m, err := receiveMessage(conn)
 		if err != nil {
-			log.Println("acceptConnections: ", err)
+			continue
 		}
 
-		log.Println("acceptConnections: Adding connection to map")
 		id := receiveNewConnMessage(m.Data)
 		n.connectionMap[id] = conn
 	}
@@ -286,7 +219,6 @@ func (n *Node) establishConnections() {
 
 		// if connection already exists don't do anything
 		if _, ok := n.connectionMap[k]; ok {
-			log.Printf("establishConnections: Connection to %s already exists\n", k)
 			continue
 
 			// establish new connection only if connection doesn't exist and target id is
@@ -294,7 +226,6 @@ func (n *Node) establishConnections() {
 			// this is done in order to establish only one connection
 			// between each pair of nodes
 		} else if myID > targetID {
-			log.Printf("establishConnections: Launching connectionStart to %s\n", k)
 			go n.connectionStart(k, v.Address)
 		}
 	}
