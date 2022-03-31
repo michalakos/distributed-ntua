@@ -13,12 +13,15 @@ import (
 	"math/big"
 	"net"
 	"time"
+	// mathrand "math/rand"
 )
 
 // setup new node information
 func (n *Node) Setup(localAddr string) {
+
 	n.generateWallet()
 	n.address = localAddr
+
 	n.wait = false
 
 	n.neighborMap = make(map[string]*Neighbor)
@@ -27,17 +30,16 @@ func (n *Node) Setup(localAddr string) {
 	n.blockchain = make([]Block, 0)
 
 	n.utxos = make(map[[32]byte]TXOutput)
-	n.own_utxos = make(map[[32]byte]TXOutput)
+	n.own_utxos = make(map[[32]byte]bool)
 	n.tx_queue = *NewQueue()
 	n.unused_txs = make(map[[32]byte]bool)
 
 	n.utxos_uncommited = make(map[[32]byte]TXOutput)
-	n.own_utxos_uncommited = *NewStack()
+	fmt.Println("initializing own_utxos_uncommited")
+	n.own_utxos_uncommited = *Newqueue()
 	n.tx_queue_uncommited = *NewQueue()
 
 	n.broadcast = make(chan bool)
-
-	go n.collectTransactions()
 }
 
 // create pair of private - public key
@@ -48,21 +50,15 @@ func (n *Node) generateWallet() {
 }
 
 // startup routine for bootstrap node
-// TODO: remove utxos - used for testing
 func (n *Node) bootstrapStart(localAddr string) {
 	n.neighborMap[n.id] = &Neighbor{
 		PublicKey: n.publicKey,
 		Address:   n.address,
 	}
-
 	ln, _ := net.Listen("tcp", localAddr)
 	defer ln.Close()
-
-	log.Println("bootstrapStart: Launching acceptConnectionsBootstrap")
 	go n.acceptConnectionsBootstrap(ln)
-
 	// check for messages to broadcast
-	log.Println("bootstrapStart: Launching broadcastMessages")
 	n.broadcastMessages()
 }
 
@@ -71,28 +67,24 @@ func (n *Node) nodeStart(localAddr string) {
 	// listen to designated port
 	ln, _ := net.Listen("tcp", localAddr)
 	defer ln.Close()
-
 	// look for incoming connections from nodes with greater id
-	log.Println("nodeStart: Lauching acceptConnections")
 	go n.acceptConnections(ln)
-
 	// check for messages to broadcast
-	log.Printf("nodeStart: Launching broadcastMessages\n")
 	n.broadcastMessages()
 }
 
 // create transaction from current node to node with known id for number of coins equal to "amount"
 // returns nil error if transaction was created successfully
 // if successful returns UnsignedTransaction containing all necessary information
-// TODO: fix ids
 func (n *Node) createTransaction(receiverID string, amount uint) (UnsignedTransaction, error) {
+	for n.wait {
+		continue
+	}
 	if amount <= 0 {
-		log.Println("createTransaction: Transaction amount <= 0")
 		return UnsignedTransaction{}, errors.New("InvalidTransactionAmount")
 	}
 
 	if _, ok := n.neighborMap[receiverID]; !ok {
-		log.Println("createTransaction: receiverID not in Neighbors list")
 		return UnsignedTransaction{}, errors.New("InvalidReceiverID")
 	}
 
@@ -102,14 +94,14 @@ func (n *Node) createTransaction(receiverID string, amount uint) (UnsignedTransa
 	// get utxos to fund transaction
 	for total_creds < amount {
 		utxo, err := n.own_utxos_uncommited.Pop()
+		delete(n.own_utxos, utxo.ID)
 
 		// no more utxos - transaction fails
 		// return utxos to stack
 		if err != nil {
-			log.Println("createTransaction: ", err)
-
 			for _, utxo := range utxos {
 				n.own_utxos_uncommited.Push(utxo)
+				n.own_utxos[utxo.ID] = true
 			}
 
 			return UnsignedTransaction{}, errors.New("insufficient_funds")
@@ -117,10 +109,7 @@ func (n *Node) createTransaction(receiverID string, amount uint) (UnsignedTransa
 
 		total_creds += utxo.Amount
 		utxos = append(utxos, utxo)
-
-		fmt.Println("creds:", total_creds, "from required:", amount)
 	}
-
 	recipient := n.neighborMap[receiverID].PublicKey
 
 	var tx_id, txout1_id, txout2_id [32]byte
@@ -128,19 +117,19 @@ func (n *Node) createTransaction(receiverID string, amount uint) (UnsignedTransa
 
 	_, err := rand.Read(key)
 	if err != nil {
-		log.Println("createTransaction:", err)
+		return UnsignedTransaction{}, err
 	}
 	copy(tx_id[:], key)
 
 	_, err = rand.Read(key)
 	if err != nil {
-		log.Println("createTransaction:", err)
+		return UnsignedTransaction{}, err
 	}
 	copy(txout1_id[:], key)
 
 	_, err = rand.Read(key)
 	if err != nil {
-		log.Println("createTransaction:", err)
+		return UnsignedTransaction{}, err
 	}
 	copy(txout2_id[:], key)
 
@@ -161,8 +150,6 @@ func (n *Node) createTransaction(receiverID string, amount uint) (UnsignedTransa
 			RecipientAddress: recipient,
 			Amount:           amount}}
 
-	fmt.Println("sender has:", total_creds-amount, "and receiver:", amount)
-
 	utx := UnsignedTransaction{
 		SenderAddress:      n.publicKey,
 		ReceiverAddress:    recipient,
@@ -173,6 +160,7 @@ func (n *Node) createTransaction(receiverID string, amount uint) (UnsignedTransa
 	}
 
 	n.own_utxos_uncommited.Push(outputs[0])
+	n.own_utxos[outputs[0].ID] = true
 
 	return utx, nil
 }
@@ -219,13 +207,10 @@ func (n *Node) broadcastBlock(bl Block) {
 	}
 
 	// validate block before broadcasting
-	log.Println("broadcastBlock: validating block")
-	if !n.validateBlock(bl) {
-		log.Println("broadcastBlock: block invalid")
+	if !n.wait && !n.validateBlock(bl) {
 		return
 	}
 
-	log.Println("broadcastBlock: broadcasting block with index", bl.Index)
 	n.minedBlock = bl
 	n.broadcastType = BlockMessageType
 	n.broadcast <- true
@@ -267,7 +252,6 @@ func (n *Node) verifySignature(tx Transaction) bool {
 func (n *Node) validateTransaction(tx Transaction) bool {
 	// verify public key matches signature
 	if !n.verifySignature(tx) {
-		log.Println("validateTransaction: failed to verify signature")
 		return false
 	}
 
@@ -282,7 +266,6 @@ func (n *Node) validateTransaction(tx Transaction) bool {
 	}
 	// public key not responding to any known neighbor
 	if !found {
-		log.Println("validateTransaction: failed to match SenderAddress to any known node")
 		return false
 	}
 
@@ -296,7 +279,6 @@ func (n *Node) validateTransaction(tx Transaction) bool {
 	}
 	// public key not responding to any known neighbor
 	if !found {
-		log.Println("validateTransaction: failed to match ReceiverAddress to any known node")
 		return false
 	}
 
@@ -304,8 +286,6 @@ func (n *Node) validateTransaction(tx Transaction) bool {
 	input_sum := uint(0)
 	for _, ti := range tx.TransactionInputs {
 		if txout, ok := n.utxos[ti.PreviousOutputID]; !ok {
-			fmt.Println("unmatched utxo:", ti.PreviousOutputID)
-			log.Println("validateTransaction: failed to match Transaction Inputs to UTXOs")
 			return false
 		} else {
 			input_sum += txout.Amount
@@ -325,31 +305,33 @@ func (n *Node) validateTransaction(tx Transaction) bool {
 	}
 
 	if !outputs_ok {
-		log.Println("validateTransaction: TXOutput receivers must be Transaction's Sender and Receiver")
 		return false
 	}
 
 	if input_sum != output_sum {
-		log.Println("validateTransaction: input credits", input_sum, "not equal to output credits", output_sum)
 		return false
 	}
 
-	log.Println("validateTransaction: Transaction valid")
 	delete(n.unused_txs, tx.TransactionID)
 
 	// remove utxos from own and total utxos list
 	for _, ti := range tx.TransactionInputs {
-		delete(n.own_utxos, ti.PreviousOutputID)
 		delete(n.utxos, ti.PreviousOutputID)
 	}
 
 	txo1 := &tx.TransactionOutputs[0]
 	txo2 := &tx.TransactionOutputs[1]
 
-	if compare(n.publicKey, txo1.RecipientAddress) {
-		n.own_utxos[txo1.ID] = *txo1
-	} else if compare(n.publicKey, txo2.RecipientAddress) {
-		n.own_utxos[txo2.ID] = *txo2
+	fmt.Println(txo1.Amount, txo2.Amount)
+	_, ok1 := n.own_utxos[txo1.ID]
+	_, ok2 := n.own_utxos[txo2.ID]
+
+	// TXOutput0 is the remaining balance - do not reenter in stack
+	if compare(n.publicKey, txo1.RecipientAddress) && ok1 {
+		fmt.Println(txo1.Amount, "are returned as change")
+	} else if compare(n.publicKey, txo2.RecipientAddress) && !ok2 && !n.wait {
+		n.own_utxos_uncommited.Push(*txo2)
+		n.own_utxos[txo2.ID] = true
 	}
 	n.utxos[txo1.ID] = *txo1
 	n.utxos[txo2.ID] = *txo2
@@ -364,7 +346,6 @@ func (n *Node) validateTransaction(tx Transaction) bool {
 func (n *Node) softValidateTransaction(tx Transaction) bool {
 	// verify public key matches signature
 	if !n.verifySignature(tx) {
-		log.Println("softValidateTransaction: failed to verify signature")
 		return false
 	}
 
@@ -378,7 +359,6 @@ func (n *Node) softValidateTransaction(tx Transaction) bool {
 	}
 	// public key not responding to any known neighbor
 	if !found {
-		log.Println("softValidateTransaction: failed to match SenderAddress to any known node")
 		return false
 	}
 
@@ -392,7 +372,6 @@ func (n *Node) softValidateTransaction(tx Transaction) bool {
 	}
 	// public key not responding to any known neighbor
 	if !found {
-		log.Println("softValidateTransaction: failed to match ReceiverAddress to any known node")
 		return false
 	}
 
@@ -400,7 +379,6 @@ func (n *Node) softValidateTransaction(tx Transaction) bool {
 	input_sum := uint(0)
 	for _, ti := range tx.TransactionInputs {
 		if txout, ok := n.utxos_uncommited[ti.PreviousOutputID]; !ok {
-			log.Println("softValidateTransaction: failed to match Transaction Inputs to UTXOs")
 			return false
 		} else {
 			input_sum += txout.Amount
@@ -418,14 +396,10 @@ func (n *Node) softValidateTransaction(tx Transaction) bool {
 			outputs_ok = true
 		}
 	}
-
 	if !outputs_ok {
-		log.Println("softValidateTransaction: TXOutput receivers must be Transaction's Sender and Receiver")
 		return false
 	}
-
 	if input_sum != output_sum {
-		log.Println("softValidateTransaction: input credits not equal to output credits", input_sum, output_sum)
 		return false
 	}
 
@@ -437,55 +411,43 @@ func (n *Node) softValidateTransaction(tx Transaction) bool {
 	txo1 := &tx.TransactionOutputs[0]
 	txo2 := &tx.TransactionOutputs[1]
 
-	if compare(n.publicKey, txo1.RecipientAddress) {
-		n.own_utxos_uncommited.Push(*txo1)
-	} else if compare(n.publicKey, txo2.RecipientAddress) {
-		n.own_utxos_uncommited.Push(*txo2)
-	}
-
 	n.utxos_uncommited[txo1.ID] = *txo1
 	n.utxos_uncommited[txo2.ID] = *txo2
 
-	log.Println("softValidateTransaction: Transaction valid")
 	return true
 }
 
 // check if current hash is correct and starts with a predetermined number of zeros
 // and if the block comes after the latest block in the blockchain
 func (n *Node) validateBlock(bl Block) bool {
-	log.Println("validateBlock: new block with index", bl.Index)
 
 	// genesis block not checked
 	if len(n.blockchain) == 0 && bl.Index == 0 {
 		// accept UTXOs from genesis block (only for bootstrap)
 		for _, tx := range bl.Transactions {
+
 			if tx.Amount > 0 {
 				txo1 := &tx.TransactionOutputs[0]
 				txo2 := &tx.TransactionOutputs[1]
 
 				// only store in own unspent tokens if bootstrap
-				// FIXME: in case we keep commited and uncommited own_utxos remove uncommited from here
-				if compare(n.publicKey, txo1.RecipientAddress) {
-					n.own_utxos[txo1.ID] = *txo1
+				if compare(n.publicKey, txo1.RecipientAddress) && !n.wait {
 					n.own_utxos_uncommited.Push(*txo1)
-				} else if compare(n.publicKey, txo2.RecipientAddress) {
-					n.own_utxos[txo2.ID] = *txo2
+					n.own_utxos[txo1.ID] = true
+				} else if compare(n.publicKey, txo2.RecipientAddress) && !n.wait {
 					n.own_utxos_uncommited.Push(*txo2)
+					n.own_utxos[txo2.ID] = true
 				}
-
 				n.utxos[txo1.ID] = *txo1
 				n.utxos[txo2.ID] = *txo2
 			}
 		}
-
 		n.blockchain = append(n.blockchain, bl)
-		fmt.Println("validateBlock: new blockchain size", len(n.blockchain))
 
 		// update uncommited fields after block validation
-		log.Println("validateBlock: updating uncommited values")
 		n.updateUncommited()
 
-		fmt.Println("new wallet balances")
+		fmt.Println("New wallet balances:")
 		for id := range n.neighborMap {
 			fmt.Println(id, n.walletBalance(id))
 		}
@@ -493,13 +455,11 @@ func (n *Node) validateBlock(bl Block) bool {
 		return true
 
 	} else if uint(len(n.blockchain)) > bl.Index {
-		// TODO: possibly call resolveConflict()
-		log.Println("validateBlock: waiting for block with Index", len(n.blockchain),
-			"but received block with Index", bl.Index)
 		return false
 	} else if uint(len(n.blockchain)) < bl.Index {
-		log.Println("validateBlock: missed blocks - calling resolveConflict")
+		log.Println("Calling resolveConflict()")
 		n.resolveConflict()
+		return false
 	}
 
 	ubl := UnhashedBlock{
@@ -512,49 +472,35 @@ func (n *Node) validateBlock(bl Block) bool {
 
 	payload, err := json.Marshal(ubl)
 	if err != nil {
-		log.Println("validateBlock: Marshal->", err)
 		return false
 	}
 
 	// check if hash is correct
 	hash := sha256.Sum256(payload)
 	if hash != bl.Hash {
-		log.Println("validateBlock: current_hash not matching hash of block")
 		return false
 	}
 
 	for i, val := range hash[:difficulty/8+1] {
 		if i < difficulty/8 {
 			if val != 0 {
-				log.Println("validateBlock: hash not matching difficulty")
 				return false
 			}
 		} else if i == difficulty/8 {
 			if float64(val) >= math.Pow(2, float64(8-difficulty%8)) {
-				log.Println("validateBlock: hash not matching difficulty")
 				return false
 			}
 		} else {
-			log.Println("validateBlock: sanity check")
 			return false
 		}
 	}
 
 	// check if previous block matches the one last inserted in the blockchain
-	// TODO: possibly call resolveConflict
-	if len(n.blockchain) > 0 && bl.PreviousHash != n.blockchain[len(n.blockchain)-1].Hash {
-		log.Println("validateBlock: previous_hash not matching latest block's hash")
+	if len(n.blockchain) > 0 && (bl.PreviousHash != n.blockchain[len(n.blockchain)-1].Hash) {
 		return false
 	}
-
-	log.Println("validateBlock: block accepted - now validating included transactions")
 	n.blockchain = append(n.blockchain, bl)
-	fmt.Println("validateBlock: new blockchain size", len(n.blockchain))
 
-	// TODO: pre-commit and commit in case of false transactions
-	// TODO: if transactions are invalid decline block and roll back changes
-	// how? update -> softvalidate -> if all ok -> validate
-	// shouldn't happen because of consensus - only needed for malicious actors
 	for i, tx := range bl.Transactions {
 		valid := n.validateTransaction(tx)
 		if valid {
@@ -565,10 +511,8 @@ func (n *Node) validateBlock(bl Block) bool {
 	}
 
 	// update uncommited fields after block validation
-	// log.Println("validateBlock: updating uncommited values")
-	// n.updateUncommited()
 
-	fmt.Println("new wallet balances")
+	fmt.Println("New wallet balances")
 	for id := range n.neighborMap {
 		fmt.Println(id, n.walletBalance(id))
 	}
@@ -576,31 +520,34 @@ func (n *Node) validateBlock(bl Block) bool {
 }
 
 func (n *Node) validateChain() bool {
-	fmt.Println("validateChain: blockchain length", len(n.blockchain))
+	for n.wait {
+		continue
+	}
+	n.wait = true
+	time.Sleep(time.Millisecond * 100)
+
 	blockchain_copy := make([]Block, len(n.blockchain))
 	copy(blockchain_copy, n.blockchain)
 
 	n.blockchain = make([]Block, 0)
 	n.utxos = make(map[[32]byte]TXOutput)
-	n.own_utxos = make(map[[32]byte]TXOutput)
 	n.utxos_uncommited = make(map[[32]byte]TXOutput)
-	n.own_utxos_uncommited = *NewStack()
 
 	valid := true
 	for _, block := range blockchain_copy {
-		fmt.Println("validatechain: calling validateblock for", block.Index)
 		valid = n.validateBlock(block)
 		if !valid {
 			break
 		}
 	}
+	time.Sleep(time.Millisecond * 100)
+	n.wait = false
 	return valid
 }
 
 func (n *Node) walletBalance(id string) uint {
 	neighbor, ok := n.neighborMap[id]
 	if !ok {
-		log.Println("walletBalance: no record for client with id", id)
 		return 0
 	}
 
@@ -625,19 +572,19 @@ func (n *Node) createGenesisBlock() Block {
 
 	_, err := rand.Read(key)
 	if err != nil {
-		log.Println("createGenesisBlock:", err)
+		return Block{}
 	}
 	copy(tx_id[:], key)
 
 	_, err = rand.Read(key)
 	if err != nil {
-		log.Println("createGenesisBlock:", err)
+		return Block{}
 	}
 	copy(txout1_id[:], key)
 
 	_, err = rand.Read(key)
 	if err != nil {
-		log.Println("createGenesisBlock:", err)
+		return Block{}
 	}
 	copy(txout2_id[:], key)
 
@@ -695,52 +642,42 @@ func (n *Node) createGenesisBlock() Block {
 
 // keep accepting transactions to commit
 func (n *Node) collectTransactions() {
-	log.Println("collectTransactions: Starting...")
-	log.Println("collectTransactions: waiting for genesis block before mining")
 	for len(n.blockchain) == 0 {
 		continue
 	}
 
 	for {
-		log.Println("collectTransactions: collecting transactions for new block")
-		// fmt.Println("transactions", n.tx_queue.Size(), "uncommited", n.tx_queue_uncommited.Size())
 		collected_transactions := []Transaction{}
 		chain_length := uint(len(n.blockchain))
 
 		for len(collected_transactions) < capacity {
+			for n.wait {
+				continue
+			}
 			tx, err := n.tx_queue_uncommited.Pop()
 			if err != nil {
 				continue
 			}
-
 			if n.softValidateTransaction(tx) {
 				collected_transactions = append(collected_transactions, tx)
 			}
 		}
 
-		// for n.wait {
-		// 	continue
-		// }
 		bl, err := n.mineBlock(collected_transactions, chain_length)
 		if err != nil {
-			log.Println("collectTransactions:->", err)
+			continue
 		} else {
-			log.Println("collectTransactions: block mined successfully")
-			log.Println("collectTransactions: broadcasting new block")
 			n.broadcastBlock(bl)
 		}
 
 		// update uncommited transaction structs to restart operation
-		log.Println("collectTransactions: updating uncommited transaction structs")
 		time.Sleep(time.Millisecond * 100)
-		// FIXME: update after new block fully added
 		n.updateUncommited()
 	}
 }
 
 func (n *Node) mineBlock(txs []Transaction, chain_len uint) (Block, error) {
 	if chain_len == 0 {
-		log.Println("mineBlock: waiting for genesis block")
 		for len(n.blockchain) == 0 {
 			continue
 		}
@@ -757,13 +694,9 @@ func (n *Node) mineBlock(txs []Transaction, chain_len uint) (Block, error) {
 		Transactions: transactions,
 	}
 
-	// TODO: remove debugging i
-	i := 0
 	for {
-		// debugging
-		i++
-		if i%100 == 0 {
-			fmt.Println("iterations:", i)
+		if n.wait {
+			return Block{}, errors.New("updating chain while mining")
 		}
 
 		// create random nonce
@@ -771,7 +704,7 @@ func (n *Node) mineBlock(txs []Transaction, chain_len uint) (Block, error) {
 		key := make([]byte, 32)
 		_, err := rand.Read(key)
 		if err != nil {
-			log.Println("mineBlock: nonce generation", err)
+			continue
 		}
 		copy(nonce[:], key)
 		uhb.Nonce = nonce
@@ -797,7 +730,6 @@ func (n *Node) mineBlock(txs []Transaction, chain_len uint) (Block, error) {
 					break
 				}
 			} else {
-				log.Println("mineBlock: sanity check")
 				mined = false
 				break
 			}
@@ -809,7 +741,6 @@ func (n *Node) mineBlock(txs []Transaction, chain_len uint) (Block, error) {
 
 			// successfully mined new block
 		} else if mined {
-			log.Println("mineBlock: block successfully mined")
 			block := Block{
 				Index:        uhb.Index,
 				Timestamp:    uhb.Timestamp,
@@ -829,7 +760,6 @@ func (n *Node) mineBlock(txs []Transaction, chain_len uint) (Block, error) {
 
 // update temp values after new block is inserted to blockchain
 func (n *Node) updateUncommited() {
-	log.Println("updateUncommited: updating...")
 	// remove used transactions from transaction queue
 	temp_txs := *NewQueue()
 	for tx, err := n.tx_queue.Pop(); err == nil; tx, err = n.tx_queue.Pop() {
@@ -839,16 +769,6 @@ func (n *Node) updateUncommited() {
 		}
 	}
 	n.tx_queue.Copy(&temp_txs)
-
-	// remove used utxos from own_utxos stack
-	temp_own := *NewStack()
-	for _, tx := range n.own_utxos {
-		temp_own.Push(tx)
-	}
-	// FIXME: i think own_utxos don't need commited and uncommited -
-	// we have trust that sometime later the transaction will be accepted
-
-	// n.own_utxos_uncommited.Copy(&temp_own)
 
 	// update uncommited transactions with commited transaction values
 	for i := range n.utxos_uncommited {
@@ -862,12 +782,16 @@ func (n *Node) updateUncommited() {
 }
 
 func (n *Node) sendCoins(id string, coins uint) bool {
-	log.Println("sendCoins: sending", coins, "to", id)
-	time.Sleep(time.Millisecond * 10)
+	fmt.Println("Sending", coins, "to", id)
+
+	for n.wait {
+		continue
+	}
+
+	time.Sleep(time.Millisecond * clients * difficulty / capacity * 60)
 
 	utx, err := n.createTransaction(id, coins)
 	if err != nil {
-		log.Println("sendCoins: error creating transaction to", id, "with", coins, "coins")
 		return false
 	}
 
@@ -882,7 +806,6 @@ func (n *Node) sendCoins(id string, coins uint) bool {
 }
 
 func (n *Node) resolveConflict() {
-	n.wait = true
 	hashes := make([][32]byte, 0)
 	for _, block := range n.blockchain {
 		hashes = append(hashes, block.Hash)
@@ -897,6 +820,7 @@ func (n *Node) resolveConflict() {
 
 	n.broadcastType = ResolveRequestMessageType
 	n.broadcast <- true
+	time.Sleep(time.Millisecond * 100)
 }
 
 func (n *Node) viewTransactions() {

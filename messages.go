@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"encoding/json"
-	"fmt"
 	"log"
 	"net"
 )
@@ -13,9 +12,6 @@ func sendMessage(conn net.Conn, m Message) {
 	// encode message as json
 	mb, _ := json.Marshal(m)
 
-	// log.Printf("sendMessage: Sending message to %s\n", conn.RemoteAddr())
-	// log.Printf("sendMessage: Message sent: %s\n", mb)
-
 	// send message + "\n" as messages are separated by newline characters
 	conn.Write(mb)
 	conn.Write([]byte("\n"))
@@ -24,7 +20,6 @@ func sendMessage(conn net.Conn, m Message) {
 // send WelcomeMessage over connection with assigned id
 // used only by bootstrap
 func (n *Node) sendWelcomeMessage(conn net.Conn, id string) {
-	log.Printf("sendWelcomeMessage: Send id %s\n", id)
 
 	// add new Neighbor
 	n.neighborMap[id] = new(Neighbor)
@@ -41,13 +36,11 @@ func (n *Node) sendWelcomeMessage(conn net.Conn, id string) {
 	m := Message{WelcomeMessageType, wmb}
 
 	// send created Message
-	log.Println("sendWelcomeMessage: Calling sendMessage")
 	sendMessage(conn, m)
 }
 
 // send NewConnMessage to nodes (not bootstap) with which a connection is made
 func (n *Node) sendNewConnMessage(conn net.Conn) {
-	log.Printf("sendNewConnMessage: Send id to %s\n", conn.RemoteAddr())
 
 	// create NewConnMessage containing source's id
 	ncm := NewConnMessage{n.id}
@@ -62,13 +55,11 @@ func (n *Node) sendNewConnMessage(conn net.Conn) {
 	m := Message{NewConnMessageType, ncmb}
 
 	// send created message over connection
-	log.Println("sendNewConnMessage: Calling sendMessage")
 	sendMessage(conn, m)
 }
 
 // send own information to bootstrap over established connection
 func (n *Node) sendSelfInfoMessage(conn net.Conn) {
-	log.Println("sendSelfInfoMessage: Creating message")
 
 	// create SelfInfoMessage containing ID, PublicKey and Address
 	sim := SelfInfoMessage{
@@ -88,13 +79,11 @@ func (n *Node) sendSelfInfoMessage(conn net.Conn) {
 		Data:        simb}
 
 	// send Message over given connection
-	log.Println("sendSelfInfoMessage: Calling sendMessage")
 	sendMessage(conn, m)
 }
 
 // send information about all connected nodes over established connection
 func (n *Node) sendNeighborMessage(conn net.Conn) {
-	log.Println("sendNeighborMessage: Creating message")
 
 	// create map to add to NeighborsMessage
 	neighbors := make(map[string]Neighbor)
@@ -104,12 +93,11 @@ func (n *Node) sendNeighborMessage(conn net.Conn) {
 
 	// create NeighborsMessage
 	nm := NeighborsMessage{neighbors}
-	// log.Println("sendNeighborMessage: message sent", nm)
 
 	// encode NeighborsMessage as json
 	nmb, err := json.Marshal(nm)
 	if err != nil {
-		log.Println("sendNeighborMessage:", err)
+		return
 	}
 
 	// create Message
@@ -118,19 +106,17 @@ func (n *Node) sendNeighborMessage(conn net.Conn) {
 		Data:        nmb}
 
 	// send Message to connection
-	log.Println("sendNeighborMessage: Calling sendMessage")
 	sendMessage(conn, m)
 }
 
 // send message containing a transaction
 func (n *Node) sendTransactionMessage(conn net.Conn, tx Transaction) {
-	// log.Println("sendTransactionMessage: Creating message")
 
 	txm := TransactionMessage{tx}
 
 	txmb, err := json.Marshal(txm)
 	if err != nil {
-		log.Println("sendTransactionMessage:", err)
+		return
 	}
 
 	m := Message{
@@ -138,18 +124,16 @@ func (n *Node) sendTransactionMessage(conn net.Conn, tx Transaction) {
 		Data:        txmb,
 	}
 
-	// log.Println("sendTransactionMessage: Calling sendMessage")
 	sendMessage(conn, m)
 }
 
 func (n *Node) sendBlockMessage(conn net.Conn, bl Block) {
-	// log.Println("sendBlockMessage: Creating message")
 
 	bm := BlockMessage{bl}
 
 	bmb, err := json.Marshal(bm)
 	if err != nil {
-		log.Println("sendBlockMessage:", err)
+		return
 	}
 
 	m := Message{
@@ -157,14 +141,13 @@ func (n *Node) sendBlockMessage(conn net.Conn, bl Block) {
 		Data:        bmb,
 	}
 
-	// log.Println("sendBlockMessage: Calling sendMessage")
 	sendMessage(conn, m)
 }
 
 func (n *Node) sendResolveRequestMessage(conn net.Conn, rrm ResolveRequestMessage) {
 	rrmb, err := json.Marshal(rrm)
 	if err != nil {
-		log.Println("sendResolveRequestMessage:", err)
+		return
 	}
 
 	m := Message{
@@ -178,7 +161,7 @@ func (n *Node) sendResolveRequestMessage(conn net.Conn, rrm ResolveRequestMessag
 func (n *Node) sendResolveResponseMessage(conn net.Conn, rrm ResolveResponseMessage) {
 	rrmb, err := json.Marshal(rrm)
 	if err != nil {
-		log.Println("sendResolveResponseMessage:", err)
+		return
 	}
 
 	m := Message{
@@ -194,8 +177,6 @@ func (n *Node) sendResolveResponseMessage(conn net.Conn, rrm ResolveResponseMess
 func receiveMessage(conn net.Conn) (Message, error) {
 	messageBytes, err := bufio.NewReader(conn).ReadString('\n')
 	if err != nil {
-		log.Println("receiveMessage:", err)
-		log.Println("Closing connection")
 		conn.Close()
 		return Message{}, err
 	}
@@ -203,7 +184,7 @@ func receiveMessage(conn net.Conn) (Message, error) {
 	var m Message
 	err = json.Unmarshal([]byte(messageBytes), &m)
 	if err != nil {
-		log.Println("receiveMessage:", err)
+		return Message{}, err
 	}
 
 	return m, nil
@@ -216,7 +197,7 @@ func (n *Node) receiveNeighborsMessage(nmb []byte) {
 	var nm NeighborsMessage
 	err := json.Unmarshal(nmb, &nm)
 	if err != nil {
-		log.Println("receiveNeighborMessage:", err)
+		return
 	}
 
 	// for each node in the message update stored info
@@ -243,14 +224,13 @@ func (n *Node) receiveSelfInfoMessage(simb []byte) string {
 	var sim SelfInfoMessage
 	err := json.Unmarshal(simb, &sim)
 	if err != nil {
-		log.Println("receiveSelfInfoMessage:", err)
+		return ""
 	}
 
 	// store info in neighborMap
 	n.neighborMap[sim.ID].PublicKey = sim.PublicKey
 	n.neighborMap[sim.ID].Address = sim.Address
 
-	log.Printf("receiveSelfInfoMessage: Message from node %s\n", sim.ID)
 	return sim.ID
 }
 
@@ -261,12 +241,12 @@ func (n *Node) receiveWelcomeMessage(wmb []byte) {
 	var wm WelcomeMessage
 	err := json.Unmarshal(wmb, &wm)
 	if err != nil {
-		log.Println("receiveWelcomeMessage:", err)
+		return
 	}
 
 	// update own id with value received
 	n.id = wm.ID
-	log.Printf("receiveWelcomeMessage: Assigned %s\n", n.id)
+
 	n.neighborMap[n.id] = &Neighbor{
 		PublicKey: n.publicKey,
 		Address:   n.address,
@@ -278,21 +258,22 @@ func (n *Node) receiveTransactionMessage(txmb []byte) Transaction {
 	var txm TransactionMessage
 	err := json.Unmarshal(txmb, &txm)
 	if err != nil {
-		log.Println("receiveTransactionMessage: ", err)
+		return Transaction{}
 	}
 
-	fmt.Println("receiveTransactionMessage:", txm.TX.Amount)
 	return txm.TX
 }
 
 func (n *Node) receiveBlockMessage(bmb []byte) Block {
+	for n.wait {
+		continue
+	}
 	var bm BlockMessage
 	err := json.Unmarshal(bmb, &bm)
 	if err != nil {
-		log.Println("receiveBlockMessage:", err)
+		return Block{}
 	}
 
-	fmt.Println("received block index:", bm.B.Index)
 	return bm.B
 }
 
@@ -300,7 +281,7 @@ func (n *Node) receiveResolveRequestMessage(rrmb []byte) ResolveResponseMessage 
 	var rrm ResolveRequestMessage
 	err := json.Unmarshal(rrmb, &rrm)
 	if err != nil {
-		log.Println("receiveResolveRequestMessage:", err)
+		return ResolveResponseMessage{}
 	}
 
 	if rrm.ChainSize < uint(len(n.blockchain)) {
@@ -330,7 +311,11 @@ func (n *Node) receiveResolveResponseMessage(rrmb []byte) {
 	var rrm ResolveResponseMessage
 	err := json.Unmarshal(rrmb, &rrm)
 	if err != nil {
-		log.Println("receiveResolveResponseMessage:", err)
+		return
+	}
+
+	if len(rrm.Blocks) == 0 {
+		return
 	}
 
 	first_index := rrm.Blocks[0].Index
@@ -340,18 +325,10 @@ func (n *Node) receiveResolveResponseMessage(rrmb []byte) {
 		temp := make([]Block, first_index)
 		copy(temp[0:first_index], n.blockchain)
 
-		// copy(n.blockchain[0:first_index], n.blockchain[0:first_index])
-		fmt.Println("receive.. should be ", first_index, "is", len(temp))
-
 		temp = append(temp, rrm.Blocks...)
-		fmt.Println("receive.. should be", last_index+1, "is", len(temp))
 
 		n.blockchain = make([]Block, last_index+1)
 		copy(n.blockchain, temp)
-	}
-	fmt.Println("receive.. chain len", len(n.blockchain))
-	for _, bl := range n.blockchain {
-		fmt.Println("receiveresolve...: index", bl.Index)
 	}
 
 	n.validateChain()
@@ -363,9 +340,8 @@ func receiveNewConnMessage(ncmb []byte) string {
 	var ncm NewConnMessage
 	err := json.Unmarshal(ncmb, &ncm)
 	if err != nil {
-		log.Println("receiveNewConnMessage: ", err)
+		return ""
 	}
 
-	log.Printf("receiveNewConnMessage: received message from %s\n", ncm.ID)
 	return ncm.ID
 }
