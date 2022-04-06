@@ -177,7 +177,6 @@ func (n *Node) sendResolveResponseMessage(conn net.Conn, rrm ResolveResponseMess
 func receiveMessage(conn net.Conn) (Message, error) {
 	messageBytes, err := bufio.NewReader(conn).ReadString('\n')
 	if err != nil {
-		conn.Close()
 		return Message{}, err
 	}
 
@@ -265,9 +264,6 @@ func (n *Node) receiveTransactionMessage(txmb []byte) Transaction {
 }
 
 func (n *Node) receiveBlockMessage(bmb []byte) Block {
-	for n.wait {
-		continue
-	}
 	var bm BlockMessage
 	err := json.Unmarshal(bmb, &bm)
 	if err != nil {
@@ -283,6 +279,8 @@ func (n *Node) receiveResolveRequestMessage(rrmb []byte) ResolveResponseMessage 
 	if err != nil {
 		return ResolveResponseMessage{}
 	}
+
+	n.blockchain_lock.Lock()
 
 	if rrm.ChainSize < uint(len(n.blockchain)) {
 		blocks := make([]Block, 0)
@@ -301,9 +299,11 @@ func (n *Node) receiveResolveRequestMessage(rrmb []byte) ResolveResponseMessage 
 			Blocks: blocks,
 		}
 
+		n.blockchain_lock.Unlock()
 		return resM
 	}
 
+	n.blockchain_lock.Unlock()
 	return ResolveResponseMessage{}
 }
 
@@ -321,7 +321,7 @@ func (n *Node) receiveResolveResponseMessage(rrmb []byte) {
 	first_index := rrm.Blocks[0].Index
 	last_index := rrm.Blocks[len(rrm.Blocks)-1].Index
 
-	if last_index > uint(len(n.blockchain)) {
+	if last_index >= uint(len(n.blockchain)) {
 		temp := make([]Block, first_index)
 		copy(temp[0:first_index], n.blockchain)
 
@@ -329,9 +329,10 @@ func (n *Node) receiveResolveResponseMessage(rrmb []byte) {
 
 		n.blockchain = make([]Block, last_index+1)
 		copy(n.blockchain, temp)
+
+		n.validateChain()
 	}
 
-	n.validateChain()
 }
 
 // received on new connections with nodes that aren't the bootstrap

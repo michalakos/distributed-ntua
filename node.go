@@ -6,15 +6,12 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 )
 
-const capacity = 2
+const capacity = 5
 const clients = 4
-const difficulty = 5
+const difficulty = 2
 
-// TODO:
-// transfer funds to each connected client
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Println("Try './node.exe -h' for help")
@@ -30,15 +27,40 @@ func main() {
 	flag.Parse()
 
 	thisNode.Setup(*localAddr)
+	go thisNode.collectTransactions()
 
 	if *bootstrap {
-		go thisNode.collectTransactions()
 
 		thisNode.id = "id0"
 		go thisNode.bootstrapStart(*localAddr)
 
 		for len(thisNode.blockchain) == 0 {
 			continue
+		}
+
+		for {
+			thisNode.blockchain_lock.Lock()
+			chain_len := len(thisNode.blockchain)
+			thisNode.blockchain_lock.Unlock()
+
+			if chain_len == 9 {
+				thisNode.blockchain_lock.Lock()
+
+				receivedBlock := thisNode.blockchain[6]
+
+				copied_blockchain := make([]Block, 0)
+				for i := 0; i < 3; i++ {
+					copied_blockchain = append(copied_blockchain, thisNode.blockchain[i])
+				}
+				thisNode.blockchain = make([]Block, 3)
+				copy(thisNode.blockchain, copied_blockchain)
+
+				thisNode.validateBlock(receivedBlock)
+
+				thisNode.blockchain_lock.Unlock()
+
+				break
+			}
 		}
 
 		for {
@@ -49,21 +71,28 @@ func main() {
 		}
 
 	} else {
-		go thisNode.collectTransactions()
+		// go thisNode.collectTransactions()
 
 		go thisNode.nodeStart(*localAddr)
 		go thisNode.connectionStart("id0", *remoteAddr)
 
-		for len(thisNode.blockchain) == 0 {
+		// time.Sleep(time.Second * 30)
+		// thisNode.unspentUtxos()
+
+		for len(thisNode.blockchain) < clients+1 {
 			continue
 		}
-		time.Sleep(time.Second * 20 * clients)
+
+		thisNode.sendCoins("id0", 1)
+		thisNode.sendCoins("id0", 2)
+		thisNode.sendCoins("id0", 3)
+		thisNode.sendCoins("id0", 4)
+		thisNode.sendCoins("id0", 5)
 
 		for {
 			reader := bufio.NewReader(os.Stdin)
 			text, _ := reader.ReadString('\n')
 			words := strings.Fields(text)
-			fmt.Println(words)
 			thisNode.cli(words)
 		}
 	}

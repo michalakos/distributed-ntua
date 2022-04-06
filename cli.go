@@ -9,7 +9,7 @@ import (
 func (n *Node) cli(words []string) {
 	if len(words) == 3 && words[0] == "t" {
 		if _, ok := n.neighborMap[words[1]]; !ok {
-			fmt.Println("no client with id", words[1])
+			fmt.Println("No client with id", words[1])
 			n.help()
 			return
 		}
@@ -17,7 +17,6 @@ func (n *Node) cli(words []string) {
 		parsed, err := strconv.ParseUint(words[2], 10, 32)
 		if err != nil {
 			log.Println("cli: ParseUint", err)
-			fmt.Println("error parsing number")
 			n.help()
 			return
 		}
@@ -32,11 +31,20 @@ func (n *Node) cli(words []string) {
 			n.balance()
 		} else if words[0] == "help" {
 			n.help()
+		} else if words[0] == "txs" {
+			n.showTransactions()
+		} else if words[0] == "all" {
+			n.all_balances()
+		} else if words[0] == "hashes" {
+			n.hashes()
+		} else {
+			n.help()
 		}
 	} else {
 		n.help()
 	}
 }
+
 func (n *Node) transaction(id string, amount uint) {
 	n.sendCoins(id, amount)
 }
@@ -45,11 +53,10 @@ func (n *Node) view() {
 	n.viewTransactions()
 }
 func (n *Node) balance() {
-	fmt.Println("Wallet balance is:", n.walletBalance(n.id))
+	fmt.Println("\nWallet balance is:", n.walletBalance(n.id))
 }
 func (n *Node) help() {
-	fmt.Println("")
-	fmt.Println("supported commands:")
+	fmt.Println("\nsupported commands:")
 	fmt.Println("")
 
 	// transaction help
@@ -72,4 +79,20 @@ func (n *Node) help() {
 	// help help
 	fmt.Println("help")
 	fmt.Println("\thelp about cli commands")
+}
+
+func (n *Node) all_balances() {
+	fmt.Println("\nThe balances of all wallets are:")
+	for id := range n.neighborMap {
+		fmt.Println(id, n.walletBalance(id))
+	}
+}
+
+func (n *Node) hashes() {
+	fmt.Println("\nThe hashes of the blocks in the blockchain are:")
+	n.blockchain_lock.Lock()
+	for _, bl := range n.blockchain {
+		fmt.Println("Block", bl.Index, "with hash", bl.Hash)
+	}
+	n.blockchain_lock.Unlock()
 }

@@ -19,7 +19,11 @@ func Newqueue() *utxoQueue {
 
 func (s *utxoQueue) Copy(original *utxoQueue) {
 	s.lock.Lock()
+	original.lock.Lock()
+
 	defer s.lock.Unlock()
+	defer original.lock.Unlock()
+
 	s.utxos = make([]TXOutput, len(original.utxos))
 	copy(s.utxos, original.utxos)
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/rsa"
 	"net"
+	"sync"
 )
 
 // struct representing a client
@@ -12,29 +13,29 @@ type Node struct {
 	privateKey rsa.PrivateKey
 	publicKey  rsa.PublicKey
 	address    string
-	wait       bool
 
 	// info about system
 	neighborMap   map[string]*Neighbor
 	connectionMap map[string]net.Conn
 
 	// current blockchain
-	blockchain []Block
+	blockchain      []Block
+	blockchain_lock sync.Mutex
+	mine_lock       sync.Mutex
 
 	// info about state of blockchain
-	utxos      map[[32]byte]TXOutput
-	own_utxos  map[[32]byte]bool
-	tx_queue   transactionQueue
-	unused_txs map[[32]byte]bool
+	utxos_val      map[[32]byte]TXOutput
+	utxos_soft_val map[[32]byte]TXOutput
+	utxos_commited map[[32]byte]TXOutput
 
-	// copy of blockchain state with changes not yet commited to ledger
-	// used for selecting transactions to add to a block before starting mining
-	utxos_uncommited     map[[32]byte]TXOutput
-	own_utxos_uncommited utxoQueue
-	tx_queue_uncommited  transactionQueue
+	self_utxos utxoQueue
+
+	tx_queue transactionQueue  // queue of all transactions recorded
+	used_txs map[[32]byte]bool // set of transactions already in blockchain or selected for new block
 
 	// auxiliary fields for message broadcasting
 	broadcast            chan bool
+	broadcast_lock       sync.Mutex
 	broadcastType        MessageTypeVar
 	initiatedTransaction Transaction
 	minedBlock           Block
@@ -90,7 +91,7 @@ type TXOutput struct {
 // before it is hashed
 type UnhashedBlock struct {
 	Index        uint
-	Timestamp    int64 // Timestamp := time.now().Unix()
+	Timestamp    int64
 	PreviousHash [32]byte
 	Transactions [capacity]Transaction
 	Nonce        [32]byte

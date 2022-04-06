@@ -34,7 +34,7 @@ func (n *Node) monitorConnection(conn net.Conn, conn_id string) {
 		// wait until a message is read
 		m, err := receiveMessage(conn)
 		if err != nil {
-			return
+			continue
 		}
 
 		// each message received should be of type Message
@@ -60,6 +60,8 @@ func (n *Node) monitorConnection(conn net.Conn, conn_id string) {
 
 			// broadcast updated neighbors' information
 			n.broadcastType = NeighborsMessageType
+
+			n.broadcast_lock.Lock()
 			n.broadcast <- true
 
 		// received message containing bootstrap's info about connected nodes
@@ -68,25 +70,13 @@ func (n *Node) monitorConnection(conn net.Conn, conn_id string) {
 			n.receiveNeighborsMessage(m.Data)
 
 		case TransactionMessageType:
-			tx := n.receiveTransactionMessage(m.Data)
-
-			n.tx_queue.Push(tx)
-			n.tx_queue_uncommited.Push(tx)
-			n.unused_txs[tx.TransactionID] = true
+			n.getTransactionMessage(m.Data)
 
 		case BlockMessageType:
-			for n.wait {
-				continue
-			}
-			bl := n.receiveBlockMessage(m.Data)
-
-			if !n.wait && n.validateBlock(bl) {
-				log.Println("monitorConnection: block validated, new chain length:", len(n.blockchain))
-			}
+			n.getBlockMessage(m.Data)
 
 		case ResolveRequestMessageType:
-			resm := n.receiveResolveRequestMessage(m.Data)
-			n.sendResolveResponseMessage(conn, resm)
+			n.getResolveRequestMessage(m.Data, conn)
 
 		case ResolveResponseMessageType:
 			n.receiveResolveResponseMessage(m.Data)
@@ -96,6 +86,30 @@ func (n *Node) monitorConnection(conn net.Conn, conn_id string) {
 			continue
 		}
 	}
+}
+
+func (n *Node) getResolveRequestMessage(data []byte, conn net.Conn) {
+	resm := n.receiveResolveRequestMessage(data)
+	n.sendResolveResponseMessage(conn, resm)
+}
+
+func (n *Node) getTransactionMessage(data []byte) {
+	tx := n.receiveTransactionMessage(data)
+
+	n.tx_queue.Push(tx)
+}
+
+func (n *Node) getBlockMessage(data []byte) {
+	bl := n.receiveBlockMessage(data)
+	// fmt.Println("Received block with index", bl.Index)
+
+	n.blockchain_lock.Lock()
+
+	if n.validateBlock(bl) {
+		log.Println("Block with index", bl.Index, "validated")
+	}
+
+	n.blockchain_lock.Unlock()
 }
 
 // broadcast messages if node's broadcast channel receives "true" value
@@ -112,10 +126,6 @@ func (n *Node) broadcastMessages() {
 				// decide what to broadcast based on broadcastType
 				switch n.broadcastType {
 
-				// messages not designed to be broadcast
-				case NullMessageType, WelcomeMessageType, SelfInfoMessageType:
-					log.Fatal("broadcastMessages: Trying to broadcast illegal message type")
-
 				// broadcast neighbors' information
 				case NeighborsMessageType:
 					n.sendNeighborMessage(c)
@@ -129,14 +139,15 @@ func (n *Node) broadcastMessages() {
 					n.sendBlockMessage(c, n.minedBlock)
 
 				case ResolveRequestMessageType:
-					time.Sleep(time.Millisecond * 50)
+					time.Sleep(time.Millisecond * 200)
 					n.sendResolveRequestMessage(c, n.resReqM)
-					time.Sleep(time.Millisecond * 50)
 
 				default:
 					log.Fatal("broadcastMessages: Trying to broadcast unknown message type")
 				}
 			}
+
+			n.broadcast_lock.Unlock()
 		}
 	}
 }
@@ -146,7 +157,7 @@ func (n *Node) broadcastMessages() {
 func (n *Node) acceptConnectionsBootstrap(ln net.Listener) {
 	currentID := 1
 
-	for currentID < clients+1 {
+	for {
 		// accept incoming connections
 		conn, err := ln.Accept()
 		if err != nil {
@@ -164,16 +175,20 @@ func (n *Node) acceptConnectionsBootstrap(ln net.Listener) {
 
 		if currentID == clients {
 			time.Sleep(time.Millisecond * 100)
+
 			genesis := n.createGenesisBlock()
 			n.broadcastBlock(genesis)
 
+			// after all clients are connected send 100 coins to each one of them
+			// send in a way that creates one block for each one of the clients
 			for id := range n.neighborMap {
 				if id == n.id {
 					continue
 				}
-				for i := 0; i < 10; i++ {
-					if !n.sendCoins(id, 10) {
-						log.Print("Couldn't create first transaction to node", id)
+				time.Sleep(time.Second * 2)
+				for i := 0; i < capacity; i++ {
+					if !n.sendCoins(id, 100/capacity) {
+						log.Fatal("Couldn't create first transaction to node", id)
 					}
 				}
 			}
@@ -197,6 +212,8 @@ func (n *Node) acceptConnections(ln net.Listener) {
 
 		id := receiveNewConnMessage(m.Data)
 		n.connectionMap[id] = conn
+
+		go n.monitorConnection(conn, id)
 	}
 }
 

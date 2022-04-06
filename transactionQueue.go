@@ -20,7 +20,10 @@ func NewQueue() *transactionQueue {
 // copy original stack onto this object's
 func (s *transactionQueue) Copy(original *transactionQueue) {
 	s.lock.Lock()
+	original.lock.Lock()
+
 	defer s.lock.Unlock()
+	defer original.lock.Unlock()
 
 	s.txs = make([]Transaction, len(original.txs))
 	copy(s.txs, original.txs)
