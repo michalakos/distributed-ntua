@@ -106,6 +106,7 @@ func (n *Node) createTransaction(receiverID string, amount uint) (UnsignedTransa
 		total_creds += utxo.Amount
 		utxos = append(utxos, utxo)
 	}
+	fmt.Println("credits collected:", total_creds, "from needed:", amount)
 
 	recipient := n.neighborMap[receiverID].PublicKey
 
@@ -399,10 +400,14 @@ func (n *Node) validateBlock(bl Block) bool {
 				txo2 := &tx.TransactionOutputs[1]
 
 				// only store in own unspent tokens if bootstrap
-				if compare(n.publicKey, txo1.RecipientAddress) {
-					n.self_utxos.Push(*txo1)
-				} else if compare(n.publicKey, txo2.RecipientAddress) {
-					n.self_utxos.Push(*txo2)
+				if n.broadcastType != ResolveRequestMessageType {
+					if compare(n.publicKey, txo1.RecipientAddress) {
+						fmt.Println("ONLY ONCE")
+						n.self_utxos.Push(*txo1)
+					} else if compare(n.publicKey, txo2.RecipientAddress) {
+						fmt.Println("ONLY ONCE")
+						n.self_utxos.Push(*txo2)
+					}
 				}
 				n.utxos_commited[txo1.ID] = *txo1
 				n.utxos_commited[txo2.ID] = *txo2
@@ -788,6 +793,7 @@ func (n *Node) sendCoins(id string, coins uint) bool {
 
 	utx, err := n.createTransaction(id, coins)
 	if err != nil {
+		n.mine_lock.Unlock()
 		return false
 	}
 
@@ -803,10 +809,12 @@ func (n *Node) sendCoins(id string, coins uint) bool {
 }
 
 func (n *Node) showTransactions() {
-	tx, err := n.tx_queue.Pop()
+	temp_txs := NewQueue()
+	temp_txs.Copy(&n.tx_queue)
+	tx, err := temp_txs.Pop()
 	for err == nil {
 		fmt.Println("tx from", n.getId(tx.SenderAddress), "to", n.getId(tx.ReceiverAddress), "for", tx.Amount)
-		tx, err = n.tx_queue.Pop()
+		tx, err = temp_txs.Pop()
 	}
 }
 

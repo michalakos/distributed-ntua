@@ -38,30 +38,30 @@ func main() {
 			continue
 		}
 
-		for {
-			thisNode.blockchain_lock.Lock()
-			chain_len := len(thisNode.blockchain)
-			thisNode.blockchain_lock.Unlock()
+		// for {
+		// 	thisNode.blockchain_lock.Lock()
+		// 	chain_len := len(thisNode.blockchain)
+		// 	thisNode.blockchain_lock.Unlock()
 
-			if chain_len == 9 {
-				thisNode.blockchain_lock.Lock()
+		// 	if chain_len == 9 {
+		// 		thisNode.blockchain_lock.Lock()
 
-				receivedBlock := thisNode.blockchain[6]
+		// 		receivedBlock := thisNode.blockchain[6]
 
-				copied_blockchain := make([]Block, 0)
-				for i := 0; i < 3; i++ {
-					copied_blockchain = append(copied_blockchain, thisNode.blockchain[i])
-				}
-				thisNode.blockchain = make([]Block, 3)
-				copy(thisNode.blockchain, copied_blockchain)
+		// 		copied_blockchain := make([]Block, 0)
+		// 		for i := 0; i < 3; i++ {
+		// 			copied_blockchain = append(copied_blockchain, thisNode.blockchain[i])
+		// 		}
+		// 		thisNode.blockchain = make([]Block, 3)
+		// 		copy(thisNode.blockchain, copied_blockchain)
 
-				thisNode.validateBlock(receivedBlock)
+		// 		thisNode.validateBlock(receivedBlock)
 
-				thisNode.blockchain_lock.Unlock()
+		// 		thisNode.blockchain_lock.Unlock()
 
-				break
-			}
-		}
+		// 		break
+		// 	}
+		// }
 
 		for {
 			reader := bufio.NewReader(os.Stdin)
@@ -84,10 +84,10 @@ func main() {
 		}
 
 		thisNode.sendCoins("id0", 1)
-		thisNode.sendCoins("id0", 2)
-		thisNode.sendCoins("id0", 3)
-		thisNode.sendCoins("id0", 4)
-		thisNode.sendCoins("id0", 5)
+		// thisNode.sendCoins("id0", 2)
+		// thisNode.sendCoins("id0", 3)
+		// thisNode.sendCoins("id0", 4)
+		// thisNode.sendCoins("id0", 5)
 
 		for {
 			reader := bufio.NewReader(os.Stdin)
