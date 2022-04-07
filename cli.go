@@ -68,12 +68,27 @@ func (n *Node) help() {
 
 	// view help
 	fmt.Println("view")
-	fmt.Println("\tprints the details of all transactions in the last block")
+	fmt.Println("\tshows details of all transactions in the latest block")
 	fmt.Println("")
 
 	// balance help
 	fmt.Println("balance")
-	fmt.Println("\tprints the client's remaining coins")
+	fmt.Println("\treturns the client's remaining coins")
+	fmt.Println("")
+
+	// all transactions help
+	fmt.Println("txs")
+	fmt.Println("\treturns all the transactions received by the node in chronological order")
+	fmt.Println("")
+
+	// all balances help
+	fmt.Println("all")
+	fmt.Println("\treturns the amount of coins in each of the system's nodes")
+	fmt.Println("")
+
+	// hashes help
+	fmt.Println("hashes")
+	fmt.Println("\treturns the hashes of all the blocks in the blockchain")
 	fmt.Println("")
 
 	// help help

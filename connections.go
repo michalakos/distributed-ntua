@@ -139,14 +139,16 @@ func (n *Node) broadcastMessages() {
 					n.sendBlockMessage(c, n.minedBlock)
 
 				case ResolveRequestMessageType:
-					time.Sleep(time.Millisecond * 200)
+					n.resolving_conflict = true
 					n.sendResolveRequestMessage(c, n.resReqM)
+					time.Sleep(time.Millisecond * 200)
 
 				default:
 					log.Fatal("broadcastMessages: Trying to broadcast unknown message type")
 				}
 			}
 
+			n.resolving_conflict = false
 			n.broadcast_lock.Unlock()
 		}
 	}
@@ -173,7 +175,7 @@ func (n *Node) acceptConnectionsBootstrap(ln net.Listener) {
 		// send welcome message with assigned id to node
 		n.sendWelcomeMessage(conn, "id"+strconv.Itoa(currentID))
 
-		if currentID == clients {
+		if currentID == clients-1 {
 			time.Sleep(time.Millisecond * 100)
 
 			genesis := n.createGenesisBlock()
@@ -200,7 +202,7 @@ func (n *Node) acceptConnectionsBootstrap(ln net.Listener) {
 
 // accept incoming connections and storing information
 func (n *Node) acceptConnections(ln net.Listener) {
-	for count := 0; count < clients-1; count++ {
+	for count := 0; count < clients-2; count++ {
 		conn, err := ln.Accept()
 		if err != nil {
 			continue

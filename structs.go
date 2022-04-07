@@ -23,6 +23,8 @@ type Node struct {
 	blockchain_lock sync.Mutex
 	mine_lock       sync.Mutex
 
+	resolving_conflict bool
+
 	// info about state of blockchain
 	utxos_val      map[[32]byte]TXOutput
 	utxos_soft_val map[[32]byte]TXOutput
@@ -91,7 +93,7 @@ type TXOutput struct {
 // before it is hashed
 type UnhashedBlock struct {
 	Index        uint
-	Timestamp    int64
+	Timestamp    int64 // Timestamp := time.now().Unix()
 	PreviousHash [32]byte
 	Transactions [capacity]Transaction
 	Nonce        [32]byte
