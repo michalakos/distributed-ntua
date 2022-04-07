@@ -14,7 +14,6 @@ import (
 	"net"
 	"sync"
 	"time"
-	// mathrand "math/rand"
 )
 
 // setup new node information
@@ -423,7 +422,7 @@ func (n *Node) validateBlock(bl Block) bool {
 		return false
 	} else if chain_len < bl.Index {
 		log.Println("Possible gap in chain - calling resolveConflict()")
-		n.resolveConflict()
+		n.resolveConflict(bl.Index)
 		return false
 	}
 
@@ -455,9 +454,9 @@ func (n *Node) validateBlock(bl Block) bool {
 	}
 
 	// check if previous block matches the one last inserted in the blockchain
-	if bl.PreviousHash != n.blockchain[bl.Index-1].Hash {
+	if bl.Index > 0 && bl.PreviousHash != n.blockchain[bl.Index-1].Hash {
 		log.Println("Previous hash not matching the one in the blockchain - calling resolveConflict")
-		n.resolveConflict()
+		n.resolveConflict(bl.Index)
 		return false
 	}
 
@@ -599,9 +598,15 @@ func (n *Node) createGenesisBlock() Block {
 
 // keep accepting transactions to commit
 func (n *Node) collectTransactions() {
-	for len(n.blockchain) == 0 {
-		continue
+	for {
+		n.blockchain_lock.Lock()
+		if len(n.blockchain) > 0 {
+			n.blockchain_lock.Unlock()
+			break
+		}
+		n.blockchain_lock.Unlock()
 	}
+
 	n.updateUncommited()
 
 	// after each block is added to the blockchain collect the
@@ -614,8 +619,6 @@ func (n *Node) collectTransactions() {
 
 		all_txs := *NewQueue()
 		all_txs.Copy(&n.tx_queue)
-
-		// log.Println("Collecting transactions for block", chain_length)
 
 		// collect transactions not already in the blockchain and not already selected for the new block
 		// repeat until block is full
@@ -654,6 +657,8 @@ func (n *Node) collectTransactions() {
 		// at this point we have collected the transactions which go to the next block -
 		// start mining until either this block or a block received from another client is valid
 
+		start_time := time.Now().Unix()
+
 		if skip {
 			skip = false
 		} else {
@@ -666,9 +671,12 @@ func (n *Node) collectTransactions() {
 				n.broadcastBlock(block)
 			}
 			n.blockchain_lock.Unlock()
-		}
 
-		// n.blockchain_lock.Unlock()
+			stop_time := time.Now().Unix()
+			block_time := stop_time - start_time
+			fmt.Println(">>Block time:", block_time)
+			fmt.Println("")
+		}
 
 		n.updateUncommited()
 	}
@@ -676,7 +684,6 @@ func (n *Node) collectTransactions() {
 
 func (n *Node) mineBlock(txs []Transaction, chain_len uint) Block {
 	fmt.Println("\nMining block", chain_len)
-	start_time := time.Now().Unix()
 
 	var transactions [capacity]Transaction
 	copy(transactions[:], txs)
@@ -696,7 +703,6 @@ func (n *Node) mineBlock(txs []Transaction, chain_len uint) Block {
 	for {
 		i++
 		if i%20000 == 0 {
-			log.Println("Iterations:", i)
 
 			// check if new block was added while mining
 			// not in every iteration because checking is expensive
@@ -738,12 +744,7 @@ func (n *Node) mineBlock(txs []Transaction, chain_len uint) Block {
 		}
 
 		if mined {
-			stop_time := time.Now().Unix()
-			block_time := stop_time - start_time
 			log.Println("Block mined")
-
-			fmt.Println("\n>>Block time:", block_time)
-			fmt.Println("")
 
 			return Block{
 				Index:        ublock.Index,
@@ -808,7 +809,7 @@ func (n *Node) showTransactions() {
 	}
 }
 
-func (n *Node) resolveConflict() {
+func (n *Node) resolveConflict(index uint) {
 	hashes := make([][32]byte, 0)
 	for _, block := range n.blockchain {
 		hashes = append(hashes, block.Hash)
@@ -823,7 +824,9 @@ func (n *Node) resolveConflict() {
 	}
 	n.broadcastType = ResolveRequestMessageType
 	n.broadcast <- true
-	time.Sleep(time.Second)
+	for int(index) > len(n.blockchain) {
+		continue
+	}
 }
 
 func (n *Node) viewTransactions() {

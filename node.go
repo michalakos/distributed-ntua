@@ -8,11 +8,12 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
-const capacity = 5   // number of transactions in a block
 const clients = 5    // number of clients in system
 const difficulty = 4 // number of nibbles (half bytes) to be zero on the start of a block's hash
+const capacity = 5   // number of transactions in a block
 
 func main() {
 	if len(os.Args) < 2 {
@@ -40,6 +41,17 @@ func main() {
 		go thisNode.nodeStart(*localAddr)
 		go thisNode.connectionStart("id0", *remoteAddr)
 	}
+
+	for {
+		thisNode.blockchain_lock.Lock()
+		if len(thisNode.blockchain) > 0 {
+			thisNode.blockchain_lock.Unlock()
+			break
+		}
+		thisNode.blockchain_lock.Unlock()
+	}
+
+	start_time := time.Now().Unix()
 
 	// wait until all clients have 100 coins
 	for len(thisNode.blockchain) < clients {
@@ -86,6 +98,17 @@ func main() {
 		if err := scanner.Err(); err != nil {
 			log.Fatal(err)
 		}
+
+		end_time := time.Now().Unix()
+		block_time := float32(end_time-start_time) / float32(len(thisNode.blockchain))
+		fmt.Println("\n\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+		fmt.Println("Blocks in chain:", len(thisNode.blockchain))
+		fmt.Println("in", end_time-start_time, "seconds")
+		fmt.Println("Mean block time:", block_time, "seconds")
+		fmt.Println("Throughput:", float32(capacity)/block_time)
+		fmt.Println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+		fmt.Println("")
+		fmt.Println("")
 	}
 
 	for {
@@ -95,30 +118,3 @@ func main() {
 		thisNode.cli(words)
 	}
 }
-
-// test for resolveConflict()
-
-// for {
-// 	thisNode.blockchain_lock.Lock()
-// 	chain_len := len(thisNode.blockchain)
-// 	thisNode.blockchain_lock.Unlock()
-
-// 	if chain_len == 9 {
-// 		thisNode.blockchain_lock.Lock()
-
-// 		receivedBlock := thisNode.blockchain[6]
-
-// 		copied_blockchain := make([]Block, 0)
-// 		for i := 0; i < 3; i++ {
-// 			copied_blockchain = append(copied_blockchain, thisNode.blockchain[i])
-// 		}
-// 		thisNode.blockchain = make([]Block, 3)
-// 		copy(thisNode.blockchain, copied_blockchain)
-
-// 		thisNode.validateBlock(receivedBlock)
-
-// 		thisNode.blockchain_lock.Unlock()
-
-// 		break
-// 	}
-// }
